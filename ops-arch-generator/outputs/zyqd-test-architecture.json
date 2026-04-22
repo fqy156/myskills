@@ -1,0 +1,711 @@
+{
+  "workbook": "/home/indigo/myprj/ops-arch-generator-src/zyqd-test.xlsx",
+  "title": "生产环境部署图",
+  "output_pptx": "/home/indigo/myprj/ops-arch-generator/outputs/zyqd-test-architecture.pptx",
+  "output_json": "/home/indigo/myprj/ops-arch-generator/outputs/zyqd-test-architecture.json",
+  "counts": {
+    "resources": 22,
+    "services": 16,
+    "pods": 5,
+    "families": 13
+  },
+  "families": {
+    "lb": {
+      "display_name": "负载均衡",
+      "zone": "access",
+      "ports": [
+        "80"
+      ],
+      "port_labels": [
+        "80"
+      ],
+      "resource_count": 0,
+      "resources": [],
+      "notes": []
+    },
+    "nginx": {
+      "display_name": "Nginx接入层",
+      "zone": "access",
+      "ports": [
+        "8082",
+        "8090"
+      ],
+      "port_labels": [
+        "web:8082",
+        "mc:8090"
+      ],
+      "resource_count": 2,
+      "resources": [
+        {
+          "env": "生产",
+          "purpose": "接入服务1:外网（苍穹）",
+          "resource_type": "虚拟机",
+          "name": "ierp-p-ng01",
+          "os_version": "麒麟V10",
+          "ip": "XX.XX.162.109",
+          "vip": "",
+          "lb_ip": "XX.XX.162.160",
+          "cpu": "4",
+          "memory": "16",
+          "system_disk": "80",
+          "data_disk": "300",
+          "mount_dir": "/oss-data/oss-appstatic",
+          "disk_type": "HDD",
+          "group_hint": "nginx",
+          "last_octet": "109"
+        },
+        {
+          "env": "生产",
+          "purpose": "接入服务1:外网（苍穹）",
+          "resource_type": "虚拟机",
+          "name": "ierp-p-ng02",
+          "os_version": "麒麟V10",
+          "ip": "XX.XX.162.110",
+          "vip": "",
+          "lb_ip": "",
+          "cpu": "4",
+          "memory": "16",
+          "system_disk": "80",
+          "data_disk": "300",
+          "mount_dir": "",
+          "disk_type": "HDD",
+          "group_hint": "nginx",
+          "last_octet": "110"
+        }
+      ],
+      "notes": []
+    },
+    "gpaas": {
+      "display_name": "gPaaS管理",
+      "zone": "application",
+      "ports": [
+        "8060"
+      ],
+      "port_labels": [
+        "8060"
+      ],
+      "resource_count": 1,
+      "resources": [
+        {
+          "env": "生产",
+          "purpose": "GPaaS平台管理（生产）",
+          "resource_type": "虚拟机",
+          "name": "ierp-p-gpaas",
+          "os_version": "麒麟V10",
+          "ip": "XX.XX.162.92",
+          "vip": "",
+          "lb_ip": "",
+          "cpu": "16",
+          "memory": "64",
+          "system_disk": "80",
+          "data_disk": "400",
+          "mount_dir": "",
+          "disk_type": "SSD",
+          "group_hint": "gpaas",
+          "last_octet": "92"
+        }
+      ],
+      "notes": []
+    },
+    "k8s": {
+      "display_name": "K8S容器集群",
+      "zone": "application",
+      "ports": [
+        "30001",
+        "30002",
+        "6443",
+        "30003"
+      ],
+      "port_labels": [
+        "web:30001",
+        "mc:30002",
+        "mc:30001",
+        "fileserver:30003",
+        "web:30002",
+        "mservice:30002",
+        "mservice-qing:30002"
+      ],
+      "resource_count": 3,
+      "resources": [
+        {
+          "env": "生产",
+          "purpose": "容器集群",
+          "resource_type": "虚拟机",
+          "name": "ierp-p-k8s04",
+          "os_version": "麒麟V10",
+          "ip": "XX.XX.162.96",
+          "vip": "",
+          "lb_ip": "",
+          "cpu": "32",
+          "memory": "128",
+          "system_disk": "80",
+          "data_disk": "400",
+          "mount_dir": "",
+          "disk_type": "SSD",
+          "group_hint": "k8s",
+          "last_octet": "96"
+        },
+        {
+          "env": "生产",
+          "purpose": "容器集群",
+          "resource_type": "虚拟机",
+          "name": "ierp-p-k8s05",
+          "os_version": "麒麟V10",
+          "ip": "XX.XX.162.97",
+          "vip": "",
+          "lb_ip": "",
+          "cpu": "32",
+          "memory": "128",
+          "system_disk": "80",
+          "data_disk": "400",
+          "mount_dir": "",
+          "disk_type": "SSD",
+          "group_hint": "k8s",
+          "last_octet": "97"
+        },
+        {
+          "env": "生产",
+          "purpose": "容器集群",
+          "resource_type": "虚拟机",
+          "name": "ierp-p-k8s06",
+          "os_version": "麒麟V10",
+          "ip": "XX.XX.162.98",
+          "vip": "",
+          "lb_ip": "",
+          "cpu": "32",
+          "memory": "128",
+          "system_disk": "80",
+          "data_disk": "400",
+          "mount_dir": "",
+          "disk_type": "SSD",
+          "group_hint": "k8s",
+          "last_octet": "98"
+        }
+      ],
+      "notes": [
+        "6443端口通过VIP：XX.XX.162.176（master节点vip地址）",
+        "30001/30002/30003端口通过LB1提供"
+      ]
+    },
+    "redis": {
+      "display_name": "Redis集群",
+      "zone": "platform",
+      "ports": [
+        "7506",
+        "7505",
+        "7507"
+      ],
+      "port_labels": [
+        "7506",
+        "7505",
+        "7507"
+      ],
+      "resource_count": 3,
+      "resources": [
+        {
+          "env": "生产",
+          "purpose": "中间件服务-redis",
+          "resource_type": "虚拟机",
+          "name": "ierp-p-redis01",
+          "os_version": "麒麟V10",
+          "ip": "XX.XX.162.126",
+          "vip": "",
+          "lb_ip": "",
+          "cpu": "16",
+          "memory": "96",
+          "system_disk": "100",
+          "data_disk": "300",
+          "mount_dir": "",
+          "disk_type": "HDD",
+          "group_hint": "redis",
+          "last_octet": "126"
+        },
+        {
+          "env": "生产",
+          "purpose": "中间件服务-redis",
+          "resource_type": "虚拟机",
+          "name": "ierp-p-redis02",
+          "os_version": "麒麟V10",
+          "ip": "XX.XX.162.127",
+          "vip": "",
+          "lb_ip": "",
+          "cpu": "16",
+          "memory": "96",
+          "system_disk": "100",
+          "data_disk": "300",
+          "mount_dir": "",
+          "disk_type": "HDD",
+          "group_hint": "redis",
+          "last_octet": "127"
+        },
+        {
+          "env": "生产",
+          "purpose": "中间件服务-redis",
+          "resource_type": "虚拟机",
+          "name": "ierp-p-redis03",
+          "os_version": "麒麟V10",
+          "ip": "XX.XX.162.128",
+          "vip": "",
+          "lb_ip": "",
+          "cpu": "16",
+          "memory": "96",
+          "system_disk": "100",
+          "data_disk": "300",
+          "mount_dir": "",
+          "disk_type": "HDD",
+          "group_hint": "redis",
+          "last_octet": "128"
+        }
+      ],
+      "notes": []
+    },
+    "mq": {
+      "display_name": "MQ集群",
+      "zone": "platform",
+      "ports": [
+        "5672"
+      ],
+      "port_labels": [
+        "5672"
+      ],
+      "resource_count": 3,
+      "resources": [
+        {
+          "env": "生产",
+          "purpose": "中间件服务-天燕mq",
+          "resource_type": "虚拟机",
+          "name": "ierp-p-admq1",
+          "os_version": "麒麟V10",
+          "ip": "XX.XX.162.86",
+          "vip": "",
+          "lb_ip": "XX.XX.162.159",
+          "cpu": "8",
+          "memory": "16",
+          "system_disk": "80",
+          "data_disk": "300",
+          "mount_dir": "",
+          "disk_type": "HDD",
+          "group_hint": "mq",
+          "last_octet": "86"
+        },
+        {
+          "env": "生产",
+          "purpose": "中间件服务-天燕mq",
+          "resource_type": "虚拟机",
+          "name": "ierp-p-admq2",
+          "os_version": "麒麟V10",
+          "ip": "XX.XX.162.87",
+          "vip": "",
+          "lb_ip": "",
+          "cpu": "8",
+          "memory": "16",
+          "system_disk": "80",
+          "data_disk": "300",
+          "mount_dir": "",
+          "disk_type": "HDD",
+          "group_hint": "mq",
+          "last_octet": "87"
+        },
+        {
+          "env": "生产",
+          "purpose": "中间件服务-天燕mq",
+          "resource_type": "虚拟机",
+          "name": "ierp-p-admq2",
+          "os_version": "麒麟V10",
+          "ip": "XX.XX.162.88",
+          "vip": "",
+          "lb_ip": "",
+          "cpu": "8",
+          "memory": "16",
+          "system_disk": "80",
+          "data_disk": "300",
+          "mount_dir": "",
+          "disk_type": "HDD",
+          "group_hint": "mq",
+          "last_octet": "88"
+        }
+      ],
+      "notes": [
+        "通过LB1做为负载均衡访问MQ服务"
+      ]
+    },
+    "zookeeper": {
+      "display_name": "ZooKeeper",
+      "zone": "platform",
+      "ports": [],
+      "port_labels": [],
+      "resource_count": 3,
+      "resources": [
+        {
+          "env": "生产",
+          "purpose": "中间件服务-ZooKeeper",
+          "resource_type": "虚拟机",
+          "name": "ierp-p-zk01",
+          "os_version": "麒麟V10",
+          "ip": "XX.XX.162.123",
+          "vip": "",
+          "lb_ip": "",
+          "cpu": "4",
+          "memory": "16",
+          "system_disk": "80",
+          "data_disk": "300",
+          "mount_dir": "",
+          "disk_type": "SSD",
+          "group_hint": "zookeeper",
+          "last_octet": "123"
+        },
+        {
+          "env": "生产",
+          "purpose": "中间件服务-ZooKeeper",
+          "resource_type": "虚拟机",
+          "name": "ierp-p-zk02",
+          "os_version": "麒麟V10",
+          "ip": "XX.XX.162.124",
+          "vip": "",
+          "lb_ip": "",
+          "cpu": "4",
+          "memory": "16",
+          "system_disk": "80",
+          "data_disk": "300",
+          "mount_dir": "",
+          "disk_type": "SSD",
+          "group_hint": "zookeeper",
+          "last_octet": "124"
+        },
+        {
+          "env": "生产",
+          "purpose": "中间件服务-ZooKeeper",
+          "resource_type": "虚拟机",
+          "name": "ierp-p-zk03",
+          "os_version": "麒麟V10",
+          "ip": "XX.XX.162.125",
+          "vip": "",
+          "lb_ip": "",
+          "cpu": "4",
+          "memory": "16",
+          "system_disk": "80",
+          "data_disk": "300",
+          "mount_dir": "",
+          "disk_type": "SSD",
+          "group_hint": "zookeeper",
+          "last_octet": "125"
+        }
+      ],
+      "notes": []
+    },
+    "elk": {
+      "display_name": "ELK日志服务",
+      "zone": "platform",
+      "ports": [
+        "9092",
+        "9200"
+      ],
+      "port_labels": [
+        "9092",
+        "9200"
+      ],
+      "resource_count": 1,
+      "resources": [
+        {
+          "env": "生产",
+          "purpose": "中间件服务-es",
+          "resource_type": "虚拟机",
+          "name": "ierp-p-elk",
+          "os_version": "麒麟V10",
+          "ip": "XX.XX.162.129",
+          "vip": "",
+          "lb_ip": "",
+          "cpu": "8",
+          "memory": "32",
+          "system_disk": "100",
+          "data_disk": "2048",
+          "mount_dir": "",
+          "disk_type": "HDD",
+          "group_hint": "elk",
+          "last_octet": "129"
+        }
+      ],
+      "notes": []
+    },
+    "pg": {
+      "display_name": "关系数据库",
+      "zone": "data",
+      "ports": [
+        "5236"
+      ],
+      "port_labels": [
+        "5236"
+      ],
+      "resource_count": 3,
+      "resources": [
+        {
+          "env": "生产",
+          "purpose": "达梦数据库：实例1",
+          "resource_type": "虚拟机",
+          "name": "ierp-p-dm1-db1",
+          "os_version": "麒麟V10",
+          "ip": "XX.XX.162.18",
+          "vip": "",
+          "lb_ip": "",
+          "cpu": "32",
+          "memory": "256",
+          "system_disk": "80",
+          "data_disk": "4096",
+          "mount_dir": "",
+          "disk_type": "SSD",
+          "group_hint": "pg",
+          "last_octet": "18"
+        },
+        {
+          "env": "生产",
+          "purpose": "达梦数据库：实例1",
+          "resource_type": "虚拟机",
+          "name": "ierp-p-dm1-db2",
+          "os_version": "麒麟V10",
+          "ip": "XX.XX.162.19",
+          "vip": "",
+          "lb_ip": "",
+          "cpu": "32",
+          "memory": "256",
+          "system_disk": "80",
+          "data_disk": "4096",
+          "mount_dir": "",
+          "disk_type": "SSD",
+          "group_hint": "pg",
+          "last_octet": "19"
+        },
+        {
+          "env": "生产",
+          "purpose": "达梦数据库：实例1",
+          "resource_type": "虚拟机",
+          "name": "ierp-p-dm1-monitor",
+          "os_version": "麒麟V10",
+          "ip": "XX.XX.162.28",
+          "vip": "",
+          "lb_ip": "",
+          "cpu": "16",
+          "memory": "64",
+          "system_disk": "80",
+          "data_disk": "512",
+          "mount_dir": "",
+          "disk_type": "SSD",
+          "group_hint": "pg",
+          "last_octet": "28"
+        }
+      ],
+      "notes": []
+    },
+    "mdd": {
+      "display_name": "多维数据库",
+      "zone": "data",
+      "ports": [
+        "8080"
+      ],
+      "port_labels": [
+        "8080"
+      ],
+      "resource_count": 2,
+      "resources": [
+        {
+          "env": "生产",
+          "purpose": "多维数据库",
+          "resource_type": "虚拟机",
+          "name": "ierp-p-mdd01",
+          "os_version": "麒麟V10",
+          "ip": "XX.XX.162.121",
+          "vip": "XX.XX.162.155",
+          "lb_ip": "",
+          "cpu": "32",
+          "memory": "256",
+          "system_disk": "100",
+          "data_disk": "2048",
+          "mount_dir": "",
+          "disk_type": "SSD",
+          "group_hint": "mdd",
+          "last_octet": "121"
+        },
+        {
+          "env": "生产",
+          "purpose": "多维数据库",
+          "resource_type": "虚拟机",
+          "name": "ierp-p-mdd02",
+          "os_version": "麒麟V10",
+          "ip": "XX.XX.162.122",
+          "vip": "",
+          "lb_ip": "",
+          "cpu": "32",
+          "memory": "256",
+          "system_disk": "100",
+          "data_disk": "2048",
+          "mount_dir": "",
+          "disk_type": "SSD",
+          "group_hint": "mdd",
+          "last_octet": "122"
+        }
+      ],
+      "notes": []
+    },
+    "appstore": {
+      "display_name": "AppStore",
+      "zone": "platform",
+      "ports": [
+        "8090"
+      ],
+      "port_labels": [],
+      "resource_count": 0,
+      "resources": [],
+      "notes": []
+    },
+    "nfs": {
+      "display_name": "共享存储(NFS)",
+      "zone": "platform",
+      "ports": [],
+      "port_labels": [],
+      "resource_count": 0,
+      "resources": [],
+      "notes": [
+        "容器持久化（图片附件，轻分析数据）；appstore、静态资源"
+      ]
+    },
+    "preview": {
+      "display_name": "文件预览",
+      "zone": "application",
+      "ports": [],
+      "port_labels": [],
+      "resource_count": 1,
+      "resources": [
+        {
+          "env": "生产",
+          "purpose": "文件预览",
+          "resource_type": "虚拟机",
+          "name": "",
+          "os_version": "麒麟V10",
+          "ip": "XX.XX.162.133",
+          "vip": "",
+          "lb_ip": "",
+          "cpu": "4",
+          "memory": "8",
+          "system_disk": "80",
+          "data_disk": "300",
+          "mount_dir": "",
+          "disk_type": "HDD",
+          "group_hint": "preview",
+          "last_octet": "133"
+        }
+      ],
+      "notes": []
+    }
+  },
+  "connections": [
+    {
+      "from": "用户",
+      "to": "负载均衡",
+      "ports": [
+        "80"
+      ]
+    },
+    {
+      "from": "负载均衡",
+      "to": "Nginx接入层",
+      "ports": [
+        "80"
+      ]
+    },
+    {
+      "from": "Nginx接入层",
+      "to": "K8S容器集群",
+      "ports": [
+        "30001",
+        "30002",
+        "6443"
+      ]
+    },
+    {
+      "from": "gPaaS管理",
+      "to": "K8S容器集群",
+      "ports": [
+        "6443"
+      ]
+    },
+    {
+      "from": "K8S容器集群",
+      "to": "文件预览",
+      "ports": []
+    },
+    {
+      "from": "K8S容器集群",
+      "to": "关系数据库",
+      "ports": [
+        "5236"
+      ]
+    },
+    {
+      "from": "K8S容器集群",
+      "to": "多维数据库",
+      "ports": [
+        "8080"
+      ]
+    },
+    {
+      "from": "K8S容器集群",
+      "to": "Redis集群",
+      "ports": [
+        "7506",
+        "7505",
+        "7507"
+      ]
+    },
+    {
+      "from": "K8S容器集群",
+      "to": "ZooKeeper",
+      "ports": []
+    },
+    {
+      "from": "K8S容器集群",
+      "to": "MQ集群",
+      "ports": [
+        "5672"
+      ]
+    },
+    {
+      "from": "K8S容器集群",
+      "to": "ELK日志服务",
+      "ports": [
+        "9092",
+        "9200"
+      ]
+    },
+    {
+      "from": "K8S容器集群",
+      "to": "共享存储(NFS)",
+      "ports": []
+    },
+    {
+      "from": "K8S容器集群",
+      "to": "AppStore",
+      "ports": [
+        "8090"
+      ]
+    }
+  ],
+  "warnings": {
+    "port_conflicts": [
+      {
+        "service": "mc",
+        "service_sheet_port": "30002",
+        "pod_sheet_port": "30001"
+      },
+      {
+        "service": "web",
+        "service_sheet_port": "30001",
+        "pod_sheet_port": "30002"
+      }
+    ],
+    "unmatched_resources": []
+  },
+  "validation": {
+    "testzip": "",
+    "slide_xml_valid": true
+  },
+  "upload": null
+}

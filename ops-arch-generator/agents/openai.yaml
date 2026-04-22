@@ -1,0 +1,8 @@
+interface:
+  display_name: "Ops Arch Generator"
+  short_description: "Generate PPT architecture diagrams from ops inventories"
+  brand_color: "#214D8A"
+  default_prompt: "Use $ops-arch-generator to parse a customer workbook and generate a PowerPoint deployment architecture diagram."
+
+policy:
+  allow_implicit_invocation: true
