@@ -62,14 +62,14 @@ def uniq_preserve(items: Iterable) -> list:
 def extract_ip_like(value: str | None) -> str | None:
     if not value:
         return None
-    match = re.search(r"((?:\d+|XX)\.(?:\d+|XX)\.(?:\d+|XX)\.(?:\d+))", value, re.IGNORECASE)
+    match = re.search(r"((?:\d+|XX)\.(?:\d+|XX)\.(?:\d+|XX)\.(?:\d+))", normalize_endpoint_text(value), re.IGNORECASE)
     return match.group(1) if match else None
 
 
 def extract_last_octet(value: str | None) -> str | None:
     if not value:
         return None
-    match = re.search(r"(?:\d+|XX)\.(?:\d+|XX)\.(?:\d+|XX)\.(\d+)", value, re.IGNORECASE)
+    match = re.search(r"(?:\d+|XX)\.(?:\d+|XX)\.(?:\d+|XX)\.(\d+)", normalize_endpoint_text(value), re.IGNORECASE)
     return match.group(1) if match else None
 
 
@@ -81,6 +81,35 @@ def extract_ports_freeform(value: str | None) -> list[str]:
 
 def normalize_ip(value: str | None) -> str:
     return (value or "").strip().replace(" ", "")
+
+
+def normalize_endpoint_text(value: str | None) -> str:
+    return re.sub(r"\.{2,}", ".", (value or "").strip().replace("：", ":"))
+
+
+def normalize_capacity(value: str | None, unit: str) -> str:
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    raw = re.sub(rf"\s*{unit}\s*$", "", raw, flags=re.IGNORECASE)
+    return raw.strip()
+
+
+def split_endpoint_parts(value: str | None) -> list[str]:
+    raw = normalize_endpoint_text(value)
+    if not raw:
+        return []
+    parts = [part.strip() for part in re.split(r"[\r\n,，;；]+", raw) if part.strip()]
+    ip_parts = [part for part in parts if extract_ip_like(part)]
+    return ip_parts or parts
+
+
+def endpoint_ip_and_ports(value: str | None) -> tuple[str, list[str]]:
+    endpoint = normalize_endpoint_text(value)
+    ip_value = extract_ip_like(endpoint)
+    display = ip_value or endpoint
+    endpoint_ports = extract_ports_freeform(endpoint) if ":" in endpoint else []
+    return display, endpoint_ports
 
 
 def short_mount_path(value: str | None) -> str:
@@ -176,26 +205,32 @@ def infer_resource_group(resource: dict) -> str:
     purpose = resource.get("purpose", "")
     name = resource.get("name", "")
     merged = canonical_text(" ".join([purpose, name, resource.get("resource_type", "")]))
+    if "lb" in merged or "blb" in merged or "负载均衡" in purpose:
+        return "lb"
     if "gpaas" in merged:
         return "gpaas"
-    if "容器集群" in purpose or "k8s" in merged:
+    if "容器集群" in purpose or "k8s" in merged or "cce" in merged:
         return "k8s"
     if "接入服务" in purpose or "ng" in canonical_text(name):
         return "nginx"
     if "多维" in purpose or "mdd" in merged:
         return "mdd"
-    if "zookeeper" in merged or canonical_text(name).startswith("ierppzk"):
+    if "zookeeper" in merged or "zk" in merged or canonical_text(name).startswith("ierppzk"):
         return "zookeeper"
     if "redis" in merged:
         return "redis"
-    if "mq" in merged or "admq" in merged:
+    if "mq" in merged or "admq" in merged or "rabbitmq" in merged:
         return "mq"
-    if "elk" in merged or "es" in canonical_text(purpose):
+    if "elk" in merged or "elasticsearch" in merged or "kafka" in merged or "logstash" in merged or "es" in canonical_text(purpose):
         return "elk"
-    if "达梦数据库" in purpose or re.search(r"\bdm\d|\bdb\d", canonical_text(name)):
+    if "达梦数据库" in purpose or "postgresql" in merged or re.search(r"\bpg\d|\bdm\d|\bdb\d", canonical_text(name)):
         return "pg"
     if "文件预览" in purpose or "preview" in merged:
         return "preview"
+    if "nfs" in merged or "共享存储" in merged:
+        return "nfs"
+    if "rpa" in merged or "robot" in merged or "机器人" in merged:
+        return "other"
     return ""
 
 
@@ -323,6 +358,9 @@ def get_cell(row: list[str], index: int) -> str:
 
 
 def parse_resource_sheet(rows: list[list[str]]) -> list[dict]:
+    if matrix_contains(rows, ["资产名称", "IP", "CPU", "内存"]):
+        return parse_simple_resource_sheet(rows)
+
     resources = []
     current_env = ""
     current_purpose = ""
@@ -384,6 +422,63 @@ def parse_resource_sheet(rows: list[list[str]]) -> list[dict]:
         record["group_hint"] = infer_resource_group(record)
         record["last_octet"] = extract_last_octet(record["ip"])
         resources.append(record)
+    return resources
+
+
+def parse_simple_resource_sheet(rows: list[list[str]]) -> list[dict]:
+    resources = []
+    current_env = ""
+    current_name = ""
+
+    for row in rows[1:]:
+        env = get_cell(row, 0)
+        asset_name = get_cell(row, 1)
+        endpoints = split_endpoint_parts(get_cell(row, 2))
+        ports = parse_port_entries(get_cell(row, 3))
+        cpu = normalize_capacity(get_cell(row, 4), "C")
+        memory = normalize_capacity(get_cell(row, 5), "G")
+        system_disk = normalize_capacity(get_cell(row, 6), "G")
+        data_disk = normalize_capacity(get_cell(row, 7), "G")
+        remark = get_cell(row, 9)
+
+        if env:
+            current_env = env
+        if asset_name and not endpoints:
+            current_name = asset_name
+            continue
+        if asset_name:
+            current_name = asset_name
+        if not endpoints:
+            continue
+
+        for index, endpoint in enumerate(endpoints):
+            ip_value, endpoint_ports = endpoint_ip_and_ports(endpoint)
+            all_ports = uniq_preserve([entry["port"] for entry in ports if entry.get("port")] + endpoint_ports)
+            base_name = current_name or asset_name or "服务器"
+            name = base_name
+            if len(endpoints) > 1:
+                name = f"{base_name}-{index + 1}"
+            record = {
+                "env": current_env,
+                "purpose": " ".join([base_name, remark]).strip(),
+                "resource_type": "服务器",
+                "name": name,
+                "os_version": "",
+                "ip": ip_value,
+                "vip": "",
+                "lb_ip": "",
+                "cpu": cpu,
+                "memory": memory,
+                "system_disk": system_disk,
+                "data_disk": data_disk,
+                "mount_dir": "",
+                "disk_type": "",
+                "ports": all_ports,
+                "group_hint": "",
+                "last_octet": extract_last_octet(ip_value),
+            }
+            record["group_hint"] = infer_resource_group(record)
+            resources.append(record)
     return resources
 
 
@@ -533,6 +628,9 @@ def dedupe_resources(resources: Iterable[dict]) -> list[dict]:
 
 
 def match_resources_to_service(service: dict, indexes: dict) -> list[dict]:
+    if service.get("direct_resources") is not None:
+        return dedupe_resources(service["direct_resources"])
+
     matched = []
     for ref in service.get("resource_refs", []):
         ref_matches = []
@@ -582,6 +680,9 @@ def build_families(resources: list[dict], services: list[dict], pods: list[dict]
             numeric_ports.extend(extract_ports_freeform(service.get("service_resources_raw")))
             notes.extend(split_nonempty_lines(service.get("remark")))
             raw_endpoints.extend([ref["raw"] for ref in service.get("resource_refs", []) if ref.get("raw")])
+
+        for resource in family_resources:
+            numeric_ports.extend(resource.get("ports", []))
 
         if key == "k8s":
             for pod in pods:
@@ -666,7 +767,10 @@ def identify_sheet_roles(reader: XlsxReader) -> dict[str, str]:
         rows = reader.read_sheet_matrix(sheet_name)
         if not rows:
             continue
-        if "resource" not in roles and matrix_contains(rows, ["机器名/服务名", "IP/域名", "数据盘"]):
+        if "resource" not in roles and (
+            matrix_contains(rows, ["机器名/服务名", "IP/域名", "数据盘"])
+            or matrix_contains(rows, ["资产名称", "IP", "CPU", "内存"])
+        ):
             roles["resource"] = sheet_name
             continue
         if "service" not in roles and matrix_contains(rows, ["服务名称", "服务资源", "服务访问端口"]):
@@ -709,6 +813,7 @@ def synthesize_services_from_resources(resources: list[dict], pods: list[dict]) 
             "version": "",
             "deploy_mode": deploy_mode,
             "source": "",
+            "direct_resources": resources_for_family,
             "service_resources_raw": "\n".join([resource.get("ip") or resource.get("name") or "" for resource in resources_for_family if resource.get("ip") or resource.get("name")]),
             "access_ports_raw": "\n".join(
                 [f'{entry["label"]}:{entry["port"]}' if entry.get("label") else entry["port"] for entry in (access_ports or []) if entry.get("port")]
@@ -722,14 +827,14 @@ def synthesize_services_from_resources(resources: list[dict], pods: list[dict]) 
         }
         services.append(service)
 
-    if lb_ips:
+    if lb_ips or grouped.get("lb"):
         add_service(
             "lb",
             "LB1",
             "负载均衡",
             "接入",
             access_ports=[{"label": "", "port": "80", "raw": "80"}],
-            remark=f'LB-IP {lb_ips[0]}',
+            remark=f'LB-IP {lb_ips[0]}' if lb_ips else "",
         )
 
     add_service("nginx", "Nginx", "反向代理/静态资源服务/应用仓库", "接入", deploy_mode="集群")
@@ -1525,11 +1630,9 @@ def main() -> int:
         roles = identify_sheet_roles(reader)
         if "resource" not in roles:
             raise ValueError("此文档不符合要求，请提供带有ip地址列的表格。")
-        if "pod" not in roles:
-            raise ValueError("Workbook is missing a recognizable pod sheet")
 
         resources = parse_resource_sheet(reader.read_sheet_matrix(roles["resource"]))
-        pods = parse_pod_sheet(reader.read_sheet_matrix(roles["pod"]))
+        pods = parse_pod_sheet(reader.read_sheet_matrix(roles["pod"])) if "pod" in roles else []
         services = parse_service_sheet(reader.read_sheet_matrix(roles["service"])) if "service" in roles else synthesize_services_from_resources(resources, pods)
     finally:
         reader.close()
