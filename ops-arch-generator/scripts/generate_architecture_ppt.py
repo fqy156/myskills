@@ -1524,7 +1524,7 @@ def main() -> int:
     try:
         roles = identify_sheet_roles(reader)
         if "resource" not in roles:
-            raise ValueError("Workbook is missing a recognizable resource sheet")
+            raise ValueError("此文档不符合要求，请提供带有ip地址列的表格。")
         if "pod" not in roles:
             raise ValueError("Workbook is missing a recognizable pod sheet")
 
