@@ -655,6 +655,116 @@ def detect_port_conflicts(services: list[dict], pods: list[dict]) -> list[dict]:
     return conflicts
 
 
+def matrix_contains(rows: list[list[str]], keywords: list[str], sample_rows: int = 6) -> bool:
+    haystack = canonical_text(" ".join(" ".join(row) for row in rows[:sample_rows]))
+    return all(canonical_text(keyword) in haystack for keyword in keywords)
+
+
+def identify_sheet_roles(reader: XlsxReader) -> dict[str, str]:
+    roles: dict[str, str] = {}
+    for sheet_name in reader.sheets:
+        rows = reader.read_sheet_matrix(sheet_name)
+        if not rows:
+            continue
+        if "resource" not in roles and matrix_contains(rows, ["机器名/服务名", "IP/域名", "数据盘"]):
+            roles["resource"] = sheet_name
+            continue
+        if "service" not in roles and matrix_contains(rows, ["服务名称", "服务资源", "服务访问端口"]):
+            roles["service"] = sheet_name
+            continue
+        if "pod" not in roles and matrix_contains(rows, ["容器节点名称", "容器端口", "外部端口"]):
+            roles["pod"] = sheet_name
+            continue
+    return roles
+
+
+def synthesize_services_from_resources(resources: list[dict], pods: list[dict]) -> list[dict]:
+    grouped: dict[str, list[dict]] = defaultdict(list)
+    lb_ips = []
+    for resource in resources:
+        if resource.get("group_hint"):
+            grouped[resource["group_hint"]].append(resource)
+        if resource.get("lb_ip"):
+            lb_ips.append(resource["lb_ip"])
+
+    services: list[dict] = []
+
+    def add_service(
+        family_key: str,
+        name: str,
+        purpose: str,
+        category: str,
+        deploy_mode: str = "",
+        access_ports: list[dict] | None = None,
+        remark: str = "",
+        vip_hint: str = "",
+    ) -> None:
+        resources_for_family = dedupe_resources(grouped.get(family_key, []))
+        if not resources_for_family and family_key not in {"lb", "nfs", "appstore"}:
+            return
+        service = {
+            "category": category,
+            "name": name,
+            "purpose": purpose,
+            "version": "",
+            "deploy_mode": deploy_mode,
+            "source": "",
+            "service_resources_raw": "\n".join([resource.get("ip") or resource.get("name") or "" for resource in resources_for_family if resource.get("ip") or resource.get("name")]),
+            "access_ports_raw": "\n".join(
+                [f'{entry["label"]}:{entry["port"]}' if entry.get("label") else entry["port"] for entry in (access_ports or []) if entry.get("port")]
+            ),
+            "remark": remark,
+            "resource_refs": [{"raw": resource.get("ip") or resource.get("name") or "", "label": "", "endpoint": resource.get("ip") or resource.get("name") or "", "ip": resource.get("ip"), "last_octet": resource.get("last_octet")} for resource in resources_for_family],
+            "access_ports": uniq_preserve(access_ports or []),
+            "remark_ports": extract_ports_freeform(remark),
+            "vip_hint": vip_hint,
+            "family_key": family_key,
+        }
+        services.append(service)
+
+    if lb_ips:
+        add_service(
+            "lb",
+            "LB1",
+            "负载均衡",
+            "接入",
+            access_ports=[{"label": "", "port": "80", "raw": "80"}],
+            remark=f'LB-IP {lb_ips[0]}',
+        )
+
+    add_service("nginx", "Nginx", "反向代理/静态资源服务/应用仓库", "接入", deploy_mode="集群")
+    add_service("gpaas", "容器管理平台", "gPaas", "容器", access_ports=[{"label": "", "port": "8060", "raw": "8060"}])
+
+    k8s_ports = []
+    for pod in pods:
+        if pod.get("external_port"):
+            k8s_ports.append({"label": pod.get("name", ""), "port": pod["external_port"], "raw": f'{pod.get("name","")}:{pod["external_port"]}'})
+    api_vip = next((resource.get("vip") for resource in grouped.get("k8s", []) if resource.get("vip")), "")
+    add_service(
+        "k8s",
+        "k8s容器服务",
+        "",
+        "容器",
+        access_ports=uniq_preserve(k8s_ports),
+        remark=f'6443端口通过VIP：{api_vip}（master节点vip地址）' if api_vip else "",
+        vip_hint=api_vip,
+    )
+
+    add_service("redis", "Redis", "分布式缓存", "平台")
+    add_service("zookeeper", "ZooKeeper", "注册与发现", "平台")
+    add_service("mq", "admq", "消息队列", "平台")
+    add_service("elk", "ELK", "日志组件", "平台")
+    add_service("pg", "pg", "关系数据库", "数据")
+    add_service("mdd", "mdd", "", "数据")
+    add_service("preview", "文件预览", "", "应用")
+
+    if grouped.get("preview") or grouped.get("nginx"):
+        add_service("nfs", "共享存储（NFS）", "", "平台", remark="容器持久化（图片附件，轻分析数据）；appstore、静态资源")
+        add_service("appstore", "Appstore", "", "平台")
+
+    return services
+
+
 def read_template_slide_size(template_path: Path) -> tuple[int, int]:
     with zipfile.ZipFile(template_path) as archive:
         root = ET.fromstring(archive.read("ppt/presentation.xml"))
@@ -780,8 +890,8 @@ class SlideBuilder:
         w: int | None = None,
         h: int | None = None,
     ) -> None:
-        label_w = w or self.sx(480000)
-        label_h = h or self.sy(180000)
+        label_w = w or self.sx(400000)
+        label_h = h or self.sy(150000)
         mid_x = (x1 + x2) // 2 - label_w // 2
         mid_y = (y1 + y2) // 2 - label_h // 2
         self.add_round_rect(
@@ -791,7 +901,7 @@ class SlideBuilder:
             label_h,
             "FFFFFF",
             color,
-            [{"text": trim_text(text, 14), "size": 620, "color": color, "bold": True}],
+            [{"text": trim_text(text, 14), "size": 540, "color": color, "bold": True}],
             border_width=12700,
             name="LineLabel",
         )
@@ -1076,6 +1186,7 @@ def render_diagram(title: str, families: dict[str, dict], pods: list[dict], slid
     connections = []
     shift_x = builder.sx(350000)
     fixed_card_h = builder.cm(1.07)
+    featured_card_h = builder.cm(1.2)
 
     builder.add_text_box(
         builder.sx(280000),
@@ -1159,11 +1270,15 @@ def render_diagram(title: str, families: dict[str, dict], pods: list[dict], slid
 
     gpaas_rect = (builder.sx(3180000) + shift_x, builder.sy(1280000), builder.sx(1750000), builder.sy(760000))
     if gpaas:
+        gpaas["fixed_server_card_h"] = featured_card_h
+        gpaas["compact_shell"] = True
         draw_server_group(builder, gpaas, gpaas_rect, "DDF5E6", "2E8B57", "2E8B57", "FFFFFF", "EAF9F0", max_servers=1)
 
-    preview_rect = (builder.sx(5350000) + shift_x, builder.sy(1280000), builder.sx(1800000), builder.sy(760000))
+    preview_rect = (builder.sx(5480000) + shift_x, builder.sy(1310000), 1096000, builder.sy(650000))
     if preview:
-        draw_server_group(builder, preview, preview_rect, "E4F2EC", "5B8E7D", "5B8E7D", "FFFFFF", "EAF7F2", max_servers=1)
+        preview["fixed_server_card_h"] = builder.cm(1.0)
+        preview["compact_shell"] = True
+        draw_server_group(builder, preview, preview_rect, "E4F2EC", "5B8E7D", "006699", "FFFFFF", "D8F3FF", max_servers=1)
 
     cluster_rect = (builder.sx(3000000) + shift_x, builder.sy(2100000), builder.sx(4400000), builder.sy(1900000))
     if k8s:
@@ -1221,7 +1336,7 @@ def render_diagram(title: str, families: dict[str, dict], pods: list[dict], slid
         end_y = cluster_rect[1] + cluster_rect[3] // 2
         builder.add_connector(start_x, start_y, end_x, end_y, "214D8A")
         if k8s.get("ports"):
-            builder.add_line_label(start_x, start_y, end_x, end_y, ",".join(k8s["ports"][:3]), "214D8A", w=builder.sx(650000), h=builder.sy(200000))
+            builder.add_line_label(start_x, start_y, end_x, end_y, ",".join(k8s["ports"][:3]), "214D8A", w=builder.sx(560000), h=builder.sy(170000))
         connections.append({"from": nginx["display_name"], "to": k8s["display_name"], "ports": k8s.get("ports", [])[:3]})
 
     if gpaas and k8s:
@@ -1229,7 +1344,9 @@ def render_diagram(title: str, families: dict[str, dict], pods: list[dict], slid
         connections.append({"from": gpaas["display_name"], "to": k8s["display_name"], "ports": ["6443"]})
 
     if preview and k8s:
-        builder.add_connector(cluster_rect[0] + cluster_rect[2], cluster_rect[1] + builder.sy(560000), preview_rect[0], preview_rect[1] + preview_rect[3] // 2, "5B8E7D")
+        preview_line_x = preview_rect[0] + preview_rect[2] // 2
+        cluster_line_x = min(max(preview_line_x, cluster_rect[0] + builder.sx(300000)), cluster_rect[0] + cluster_rect[2] - builder.sx(300000))
+        builder.add_connector(cluster_line_x, cluster_rect[1], preview_line_x, preview_rect[1] + preview_rect[3], "5B8E7D")
         connections.append({"from": k8s["display_name"], "to": preview["display_name"], "ports": []})
 
     data_families = ordered.get("data", [])
@@ -1253,7 +1370,7 @@ def render_diagram(title: str, families: dict[str, dict], pods: list[dict], slid
                 end_y = rect[1] + rect[3] // 2
                 builder.add_connector(start_x, start_y, end_x, end_y, "A23B1E")
                 if family.get("ports"):
-                    builder.add_line_label(start_x, start_y, end_x, end_y, ",".join(family["ports"][:2]), "A23B1E", w=builder.sx(520000))
+                    builder.add_line_label(start_x, start_y, end_x, end_y, ",".join(family["ports"][:2]), "A23B1E", w=builder.sx(440000), h=builder.sy(150000))
                 connections.append({"from": k8s["display_name"], "to": family["display_name"], "ports": family.get("ports", [])[:2]})
 
     platform_families = ordered.get("platform", [])
@@ -1306,7 +1423,7 @@ def render_diagram(title: str, families: dict[str, dict], pods: list[dict], slid
                 end_y = rect[1]
                 builder.add_connector(start_x, start_y, end_x, end_y, border, width=19050)
                 if family.get("ports"):
-                    builder.add_line_label(start_x, start_y, end_x, end_y, ",".join(family["ports"][:2]), border, w=builder.sx(480000))
+                    builder.add_line_label(start_x, start_y, end_x, end_y, ",".join(family["ports"][:2]), border, w=builder.sx(420000), h=builder.sy(150000))
                 connections.append({"from": k8s["display_name"], "to": family["display_name"], "ports": family.get("ports", [])[:3]})
 
     return builder.build(), connections
@@ -1405,14 +1522,15 @@ def main() -> int:
 
     reader = XlsxReader(workbook_path)
     try:
-        required_sheets = ["1-资源清单", "2-服务清单", "3-容器应用"]
-        missing = [sheet for sheet in required_sheets if sheet not in reader.sheets]
-        if missing:
-            raise ValueError(f"Workbook is missing required sheets: {', '.join(missing)}")
+        roles = identify_sheet_roles(reader)
+        if "resource" not in roles:
+            raise ValueError("Workbook is missing a recognizable resource sheet")
+        if "pod" not in roles:
+            raise ValueError("Workbook is missing a recognizable pod sheet")
 
-        resources = parse_resource_sheet(reader.read_sheet_matrix("1-资源清单"))
-        services = parse_service_sheet(reader.read_sheet_matrix("2-服务清单"))
-        pods = parse_pod_sheet(reader.read_sheet_matrix("3-容器应用"))
+        resources = parse_resource_sheet(reader.read_sheet_matrix(roles["resource"]))
+        pods = parse_pod_sheet(reader.read_sheet_matrix(roles["pod"]))
+        services = parse_service_sheet(reader.read_sheet_matrix(roles["service"])) if "service" in roles else synthesize_services_from_resources(resources, pods)
     finally:
         reader.close()
 
