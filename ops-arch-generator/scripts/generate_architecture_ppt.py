@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import math
 import re
@@ -137,6 +138,9 @@ def trim_text(value: str | None, limit: int) -> str:
 
 def compact_ip(value: str | None) -> str:
     return trim_text(value or "", 18)
+
+
+PNG_PIXEL = 9525
 
 
 def resource_spec(resource: dict) -> str:
@@ -887,6 +891,7 @@ class SlideBuilder:
         self._next_id = 2
         self.parts: list[str] = []
         self.text_margin = 36000
+        self.image_rels: list[tuple[str, str]] = []
 
     def sx(self, value: int) -> int:
         return int(value * self.width / BASE_SLIDE_W)
@@ -1038,6 +1043,18 @@ class SlideBuilder:
             f'</p:cxnSp>'
         )
 
+    def add_image(self, x: int, y: int, cx: int, cy: int, target: str, name: str = "Picture") -> None:
+        shape_id = self._new_id()
+        rel_id = f"rIdImg{len(self.image_rels) + 1}"
+        self.image_rels.append((rel_id, target))
+        self.parts.append(
+            f'<p:pic>'
+            f'<p:nvPicPr><p:cNvPr id="{shape_id}" name="{escape(name)}"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr>'
+            f'<p:blipFill><a:blip r:embed="{rel_id}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>'
+            f'<p:spPr><a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr>'
+            f'</p:pic>'
+        )
+
     def build(self) -> str:
         return (
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -1142,6 +1159,10 @@ def pod_paragraphs(pod: dict) -> list[dict]:
 
 def worker_paragraphs(resource: dict) -> list[dict]:
     return server_box_paragraphs(resource, [], "FFFFFF", "EAF4FF", small=True, include_ports=False)
+
+
+def worker_ip_only_paragraphs(resource: dict) -> list[dict]:
+    return [{"text": compact_ip(resource.get("ip") or "-"), "size": 560, "color": "FFFFFF", "bold": True}]
 
 
 def group_and_order_families(families: dict[str, dict]) -> dict[str, list[dict]]:
@@ -1285,7 +1306,7 @@ def draw_server_group(
     return rect
 
 
-def render_diagram(title: str, families: dict[str, dict], pods: list[dict], slide_width: int, slide_height: int) -> tuple[str, list[dict]]:
+def render_diagram(title: str, families: dict[str, dict], pods: list[dict], slide_width: int, slide_height: int) -> tuple[str, list[dict], list[tuple[str, str]]]:
     builder = SlideBuilder(slide_width, slide_height)
     ordered = group_and_order_families(families)
     connections = []
@@ -1327,6 +1348,7 @@ def render_diagram(title: str, families: dict[str, dict], pods: list[dict], slid
         border_width=12700,
         name="User",
     )
+    builder.add_image(user_x - builder.sx(220000), user_y + builder.sy(20000), builder.sx(180000), builder.sy(180000), "../media/user-icon.png", name="UserIcon")
 
     access_families = {family["key"]: family for family in ordered.get("access", [])}
     lb = access_families.get("lb")
@@ -1388,6 +1410,7 @@ def render_diagram(title: str, families: dict[str, dict], pods: list[dict], slid
     cluster_rect = (builder.sx(3000000) + shift_x, builder.sy(2100000), builder.sx(4400000), builder.sy(1900000))
     if k8s:
         builder.add_round_rect(*cluster_rect, "F0F8FF", "214D8A", paragraphs=None, border_width=25400, name="K8SOuter")
+        builder.add_image(cluster_rect[0] + builder.sx(120000), cluster_rect[1] + builder.sy(70000), builder.sy(220000), builder.sy(220000), "../media/k8s-icon.png", name="K8SIcon")
         header_lines = [{"text": f'K8S容器集群 ({len(k8s.get("resources", [])) or "?"} 节点)', "size": 1080, "color": "214D8A", "bold": True}]
         if k8s.get("ports"):
             header_lines.append({"text": f'对外端口 {trim_text(",".join(k8s["ports"][:4]), 22)}', "size": 700, "color": "415A77"})
@@ -1399,9 +1422,9 @@ def render_diagram(title: str, families: dict[str, dict], pods: list[dict], slid
         if vip_note:
             header_lines.append({"text": f'API VIP {trim_text(vip_note, 18)}:6443', "size": 660, "color": "415A77"})
         builder.add_text_box(
-            cluster_rect[0] + builder.sx(140000),
+            cluster_rect[0] + builder.sx(390000),
             cluster_rect[1] + builder.sy(80000),
-            cluster_rect[2] - builder.sx(280000),
+            cluster_rect[2] - builder.sx(530000),
             builder.sy(460000),
             header_lines,
             name="K8SHeader",
@@ -1410,16 +1433,33 @@ def render_diagram(title: str, families: dict[str, dict], pods: list[dict], slid
         workers = k8s.get("resources", [])
         worker_y = cluster_rect[1] + builder.sy(520000)
         worker_gap = builder.sx(100000)
-        worker_w = (cluster_rect[2] - builder.sx(280000) - worker_gap * max(0, len(workers) - 1)) // max(len(workers), 1)
-        worker_h = builder.sy(560000)
-        for idx, worker in enumerate(workers[:4]):
-            worker_x = cluster_rect[0] + builder.sx(140000) + idx * (worker_w + worker_gap)
-            builder.add_round_rect(worker_x, worker_y, worker_w, worker_h, "4D81BD", "FFFFFF", worker_paragraphs(worker), border_width=12700, name=f"Worker{idx+1}")
+        worker_area_x = cluster_rect[0] + builder.sx(140000)
+        worker_area_w = cluster_rect[2] - builder.sx(280000)
+        if len(workers) > 4:
+            worker_cols = min(4, len(workers))
+            worker_rows = math.ceil(len(workers) / worker_cols)
+            worker_gap_y = builder.sy(50000)
+            worker_w = (worker_area_w - worker_gap * max(0, worker_cols - 1)) // worker_cols
+            worker_h = builder.sy(260000)
+            for idx, worker in enumerate(workers):
+                col = idx % worker_cols
+                row = idx // worker_cols
+                worker_x = worker_area_x + col * (worker_w + worker_gap)
+                worker_box_y = worker_y + row * (worker_h + worker_gap_y)
+                builder.add_round_rect(worker_x, worker_box_y, worker_w, worker_h, "4D81BD", "FFFFFF", worker_ip_only_paragraphs(worker), border_width=12700, name=f"Worker{idx+1}")
+            pod_start_y = worker_y + worker_rows * (worker_h + worker_gap_y) + builder.sy(80000)
+        else:
+            worker_w = (worker_area_w - worker_gap * max(0, len(workers) - 1)) // max(len(workers), 1)
+            worker_h = builder.sy(560000)
+            for idx, worker in enumerate(workers[:4]):
+                worker_x = worker_area_x + idx * (worker_w + worker_gap)
+                builder.add_round_rect(worker_x, worker_y, worker_w, worker_h, "4D81BD", "FFFFFF", worker_paragraphs(worker), border_width=12700, name=f"Worker{idx+1}")
+            pod_start_y = cluster_rect[1] + builder.sy(1220000)
 
         pod_area_x = cluster_rect[0] + builder.sx(140000)
-        pod_area_y = cluster_rect[1] + builder.sy(1220000)
+        pod_area_y = pod_start_y
         pod_area_w = cluster_rect[2] - builder.sx(280000)
-        pod_area_h = cluster_rect[3] - builder.sy(1380000)
+        pod_area_h = max(builder.sy(220000), cluster_rect[1] + cluster_rect[3] - pod_area_y - builder.sy(160000))
         pod_gap_x = builder.sx(90000)
         pod_gap_y = builder.sy(90000)
         max_pod_rows = max(1, (pod_area_h + pod_gap_y) // (fixed_card_h + pod_gap_y))
@@ -1531,13 +1571,39 @@ def render_diagram(title: str, families: dict[str, dict], pods: list[dict], slid
                     builder.add_line_label(start_x, start_y, end_x, end_y, ",".join(family["ports"][:2]), border, w=builder.sx(420000), h=builder.sy(150000))
                 connections.append({"from": k8s["display_name"], "to": family["display_name"], "ports": family.get("ports", [])[:3]})
 
-    return builder.build(), connections
+    return builder.build(), connections, builder.image_rels
 
 
-def write_pptx_from_template(template_path: Path, output_path: Path, slide_xml: str) -> None:
+def build_slide_rels_xml(existing_rels_xml: bytes, image_rels: list[tuple[str, str]]) -> bytes:
+    root = ET.fromstring(existing_rels_xml)
+    ns_uri = "http://schemas.openxmlformats.org/package/2006/relationships"
+    for rel_id, target in image_rels:
+        ET.SubElement(
+            root,
+            f"{{{ns_uri}}}Relationship",
+            {
+                "Id": rel_id,
+                "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image",
+                "Target": target,
+            },
+        )
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def write_pptx_from_template(template_path: Path, output_path: Path, slide_xml: str, image_rels: list[tuple[str, str]] | None = None) -> None:
+    image_rels = image_rels or []
+    extra_media = {
+        "ppt/media/k8s-icon.png": (SCRIPT_DIR.parent / "assets" / "k8s.png").read_bytes(),
+        "ppt/media/user-icon.png": (SCRIPT_DIR.parent / "assets" / "用户.png").read_bytes(),
+    } if image_rels else {}
     with zipfile.ZipFile(template_path, "r") as source, zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as target:
         for info in source.infolist():
-            data = slide_xml.encode("utf-8") if info.filename == "ppt/slides/slide1.xml" else source.read(info.filename)
+            if info.filename == "ppt/slides/slide1.xml":
+                data = slide_xml.encode("utf-8")
+            elif info.filename == "ppt/slides/_rels/slide1.xml.rels" and image_rels:
+                data = build_slide_rels_xml(source.read(info.filename), image_rels)
+            else:
+                data = source.read(info.filename)
             new_info = zipfile.ZipInfo(info.filename, info.date_time)
             new_info.compress_type = zipfile.ZIP_DEFLATED
             new_info.comment = info.comment
@@ -1546,6 +1612,8 @@ def write_pptx_from_template(template_path: Path, output_path: Path, slide_xml: 
             new_info.external_attr = info.external_attr
             new_info.internal_attr = info.internal_attr
             target.writestr(new_info, data)
+        for filename, data in extra_media.items():
+            target.writestr(filename, data)
 
 
 def validate_pptx(path: Path) -> dict:
@@ -1646,13 +1714,13 @@ def main() -> int:
     title = args.title or f'{env_name or "客户"}部署图'
 
     slide_width, slide_height = read_template_slide_size(template_path)
-    slide_xml, connections = render_diagram(title, families, pods, slide_width, slide_height)
+    slide_xml, connections, image_rels = render_diagram(title, families, pods, slide_width, slide_height)
 
     deck_stem = args.deck_name or f"{workbook_path.stem}-architecture"
     output_pptx = output_dir / f"{deck_stem}.pptx"
     output_json = output_dir / f"{deck_stem}.json"
 
-    write_pptx_from_template(template_path, output_pptx, slide_xml)
+    write_pptx_from_template(template_path, output_pptx, slide_xml, image_rels)
     validation = validate_pptx(output_pptx)
 
     upload_result = None
