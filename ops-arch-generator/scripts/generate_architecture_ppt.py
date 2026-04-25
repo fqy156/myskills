@@ -151,6 +151,10 @@ WIRE_COLOR = "4A4A4A"
 ZONE_BORDER = "2F2F2F"
 TITLE_TEXT = "222222"
 BODY_TEXT = "5A5A5A"
+STANDARD_ICON_CM = 0.9
+STANDARD_ICON_TEXT_SIZE = 600
+SMALL_ICON_CM = 0.6
+NODE_ICON_CM = 0.8
 
 ICON_TARGETS = {
     "user": "../media/user-icon.png",
@@ -1087,14 +1091,16 @@ class SlideBuilder:
         cy: int,
         paragraphs: list[dict],
         name: str = "TextBox",
+        wrap: str = "square",
     ) -> None:
         shape_id = self._new_id()
+        text_body = self._text_body(paragraphs).replace('wrap="square"', f'wrap="{wrap}"', 1)
         self.parts.append(
             f'<p:sp>'
             f'<p:nvSpPr><p:cNvPr id="{shape_id}" name="{escape(name)}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>'
             f'<p:spPr><a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm>'
             f'<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>'
-            f'{self._text_body(paragraphs)}</p:sp>'
+            f'{text_body}</p:sp>'
         )
 
     def add_line_label(
@@ -1113,7 +1119,7 @@ class SlideBuilder:
         label_w = w or self.sx(LIGHT_LABEL_W)
         label_h = h or self.sy(LIGHT_LABEL_H)
         mid_x = (x1 + x2) // 2 - label_w // 2 + x_offset
-        mid_y = (y1 + y2) // 2 - label_h // 2 + y_offset
+        mid_y = (y1 + y2) // 2 - label_h // 2 - self.sy(90000) + y_offset
         self.add_round_rect(
             mid_x,
             mid_y,
@@ -1234,16 +1240,29 @@ class SlideBuilder:
                 shape="rect",
                 dash="dash",
             )
-        icon_box = min(cx, max(self.sy(200000), cy - self.sy(140000)), icon_cap or self.sy(320000))
+        is_pod_icon = icon_target == ICON_TARGETS["pod"]
+        if icon_target == ICON_TARGETS["server"]:
+            standard_icon = self.cm(STANDARD_ICON_CM)
+        elif icon_target in {ICON_TARGETS["mobile"], ICON_TARGETS["pc"], ICON_TARGETS["k8s"]}:
+            standard_icon = self.cm(SMALL_ICON_CM)
+        elif icon_target == ICON_TARGETS["k8s_node"]:
+            standard_icon = self.cm(NODE_ICON_CM)
+        elif is_pod_icon:
+            standard_icon = self.sy(210000)
+        else:
+            standard_icon = self.cm(STANDARD_ICON_CM)
+        icon_cap_value = (icon_cap or standard_icon) if is_pod_icon else standard_icon
+        icon_box = min(cx, max(standard_icon, cy - self.sy(180000)), icon_cap_value)
         icon_x = x + (cx - icon_box) // 2
         icon_y = y + self.sy(10000)
         self.add_image(icon_x, icon_y, icon_box, icon_box, icon_target, name=f"{name}Icon")
         text_y = icon_y + icon_box + self.sy(10000)
         text_h = max(self.sy(100000), y + cy - text_y)
-        paragraphs = [{"text": trim_text(line, 18), "size": text_size, "color": text_color, "bold": False} for line in detail_lines if line]
+        effective_text_size = max(text_size, STANDARD_ICON_TEXT_SIZE)
+        paragraphs = [{"text": trim_text(line, 18), "size": effective_text_size, "color": text_color, "bold": False} for line in detail_lines if line]
         if not paragraphs:
-            paragraphs = [{"text": "-", "size": text_size, "color": text_color}]
-        self.add_text_box(x, text_y, cx, text_h, paragraphs, name=f"{name}Text")
+            paragraphs = [{"text": "-", "size": effective_text_size, "color": text_color}]
+        self.add_text_box(x, text_y, cx, text_h, paragraphs, name=f"{name}Text", wrap="none")
 
     def build(self) -> str:
         return (
@@ -1479,11 +1498,14 @@ def draw_server_group(
         dash=shell_dash,
     )
     if shell_icon_target:
+        shell_icon_size = builder.cm(STANDARD_ICON_CM)
+        if shell_icon_target in {ICON_TARGETS["mobile"], ICON_TARGETS["pc"], ICON_TARGETS["k8s"]}:
+            shell_icon_size = builder.cm(SMALL_ICON_CM)
         builder.add_image(
             x + builder.sx(50000),
             y + builder.sy(10000),
-            builder.sy(180000),
-            builder.sy(180000),
+            shell_icon_size,
+            shell_icon_size,
             shell_icon_target,
             name=f'{family["key"]}ShellIcon',
         )
@@ -1562,7 +1584,7 @@ def render_diagram(title: str, families: dict[str, dict], pods: list[dict], slid
     ordered = group_and_order_families(families)
     connections = []
     shift_x = builder.sx(350000)
-    fixed_card_h = builder.cm(1.07)
+    fixed_card_h = builder.cm(1.28)
     featured_card_h = builder.cm(1.2)
 
     builder.add_text_box(
@@ -1577,9 +1599,10 @@ def render_diagram(title: str, families: dict[str, dict], pods: list[dict], slid
     access_box = (builder.sx(420000) + shift_x, builder.sy(1120000), builder.sx(2200000), builder.sy(2500000))
     app_box = (builder.sx(2850000) + shift_x, builder.sy(1120000), builder.sx(4650000), builder.sy(3100000))
     data_box = (builder.sx(7750000) + shift_x, builder.sy(1120000), builder.sx(3400000), builder.sy(3100000))
-    bottom_box = (builder.sx(2300000) + shift_x, builder.sy(4550000), builder.cm(20.6), builder.sy(1820000))
-
-    add_zone(builder, *bottom_box, "中间件", "F6F6F6", "6C757D")
+    middleware_cell_w = builder.cm(6.5)
+    middleware_gap_x = builder.cm(0.08)
+    middleware_gap_y = builder.cm(0.08)
+    middleware_side_pad = builder.cm(0.3)
 
     access_families = {family["key"]: family for family in ordered.get("access", [])}
     lb = access_families.get("lb")
@@ -1593,16 +1616,16 @@ def render_diagram(title: str, families: dict[str, dict], pods: list[dict], slid
     nginx_rect = None
     has_multi_lb_layout = bool(lb and external_lbs)
     if has_multi_lb_layout:
-        mobile_lb_rect = (builder.sx(1100000) + shift_x, builder.sy(1820000), builder.sx(720000), builder.sy(520000))
-        pc_lb_rect = (builder.sx(1100000) + shift_x, builder.sy(2440000), builder.sx(720000), builder.sy(520000))
-        internal_lb_rect = (builder.sx(2100000) + shift_x, builder.sy(2130000), builder.sx(760000), builder.sy(620000))
-        mobile_lb = {"key": "lb", "display_name": external_lbs[0].get("name") or "移动LB", "resources": [external_lbs[0]]}
+        mobile_lb_rect = (builder.sx(1100000) + shift_x, builder.sy(1820000), builder.sx(720000), builder.sy(640000))
+        pc_lb_rect = (builder.sx(1100000) + shift_x, builder.sy(2520000), builder.sx(720000), builder.sy(640000))
+        internal_lb_rect = (builder.sx(2100000) + shift_x, builder.sy(2180000), builder.sx(760000), builder.sy(720000))
+        mobile_lb = {"key": "lb", "display_name": external_lbs[0].get("name") or "移动LB", "resources": [external_lbs[0]], "fixed_server_card_h": builder.cm(1.45), "compact_shell": True}
         draw_server_group(builder, mobile_lb, mobile_lb_rect, "FFE5BF", "FF8C00", "FF8C00", "FFFFFF", "FFF2DB", max_servers=1)
         if len(external_lbs) > 1:
-            pc_lb = {"key": "lb", "display_name": external_lbs[1].get("name") or "PC端LB", "resources": [external_lbs[1]]}
+            pc_lb = {"key": "lb", "display_name": external_lbs[1].get("name") or "PC端LB", "resources": [external_lbs[1]], "fixed_server_card_h": builder.cm(1.45), "compact_shell": True}
             draw_server_group(builder, pc_lb, pc_lb_rect, "FFE5BF", "FF8C00", "FF8C00", "FFFFFF", "FFF2DB", max_servers=1)
         if internal_lb:
-            inner_family = {"key": "lb", "display_name": internal_lb.get("name") or "内部LB", "resources": [internal_lb]}
+            inner_family = {"key": "lb", "display_name": internal_lb.get("name") or "内部LB", "resources": [internal_lb], "fixed_server_card_h": builder.cm(1.45), "compact_shell": True}
             draw_server_group(builder, inner_family, internal_lb_rect, "FFE5BF", "FF8C00", "FF8C00", "FFFFFF", "FFF2DB", max_servers=1)
         nginx_rect = (builder.sx(2500000) + shift_x, builder.sy(2180000), builder.sx(760000), builder.sy(1180000))
         if nginx:
@@ -1623,14 +1646,14 @@ def render_diagram(title: str, families: dict[str, dict], pods: list[dict], slid
         user_group_x = builder.sx(260000)
         user_group_y = builder.sy(2160000)
         user_group_w = builder.sx(420000)
-        user_group_h = builder.sy(760000)
+        user_group_h = builder.sy(860000)
         mobile_user_y = user_group_y + builder.sy(70000)
         pc_user_y = user_group_y + builder.sy(390000)
         builder.add_round_rect(user_group_x, user_group_y, user_group_w, user_group_h, None, ZONE_BORDER, paragraphs=None, border_width=THIN_LINE, name="UserGroup", shape="rect", dash="dash")
-        builder.add_image(user_group_x + builder.sx(90000), mobile_user_y, builder.sx(200000), builder.sy(200000), ICON_TARGETS["mobile"], name="MobileIcon")
-        builder.add_image(user_group_x + builder.sx(90000), pc_user_y, builder.sx(200000), builder.sy(200000), ICON_TARGETS["pc"], name="PCIcon")
-        builder.add_text_box(user_group_x + builder.sx(10000), mobile_user_y + builder.sy(210000), builder.sx(360000), builder.sy(100000), [{"text": "Mobile", "size": 520, "color": BODY_TEXT, "bold": True}], name="MobileText")
-        builder.add_text_box(user_group_x + builder.sx(10000), pc_user_y + builder.sy(210000), builder.sx(360000), builder.sy(100000), [{"text": "PC", "size": 520, "color": BODY_TEXT, "bold": True}], name="PCText")
+        builder.add_image(user_group_x + builder.sx(90000), mobile_user_y, builder.cm(SMALL_ICON_CM), builder.cm(SMALL_ICON_CM), ICON_TARGETS["mobile"], name="MobileIcon")
+        builder.add_image(user_group_x + builder.sx(90000), pc_user_y, builder.cm(SMALL_ICON_CM), builder.cm(SMALL_ICON_CM), ICON_TARGETS["pc"], name="PCIcon")
+        builder.add_text_box(user_group_x + builder.sx(10000), mobile_user_y + builder.cm(SMALL_ICON_CM) + builder.sy(10000), builder.sx(360000), builder.sy(120000), [{"text": "Mobile", "size": STANDARD_ICON_TEXT_SIZE, "color": BODY_TEXT, "bold": True}], name="MobileText", wrap="none")
+        builder.add_text_box(user_group_x + builder.sx(10000), pc_user_y + builder.cm(SMALL_ICON_CM) + builder.sy(10000), builder.sx(360000), builder.sy(120000), [{"text": "PC", "size": STANDARD_ICON_TEXT_SIZE, "color": BODY_TEXT, "bold": True}], name="PCText", wrap="none")
         builder.add_connector(user_group_x + user_group_w, mobile_user_y + builder.sy(100000), mobile_lb_rect[0], mobile_lb_rect[1] + builder.sy(160000), "FF8C00")
         if len(external_lbs) > 1:
             builder.add_connector(user_group_x + user_group_w, pc_user_y + builder.sy(100000), pc_lb_rect[0], pc_lb_rect[1] + builder.sy(160000), "FF8C00")
@@ -1641,16 +1664,16 @@ def render_diagram(title: str, families: dict[str, dict], pods: list[dict], slid
     else:
         user_group_x = builder.sx(280000)
         user_group_y = builder.sy(2436428)
-        builder.add_image(user_group_x + builder.sx(90000), user_group_y + builder.sy(70000), builder.sx(200000), builder.sy(200000), ICON_TARGETS["mobile"], name="MobileIcon")
-        builder.add_image(user_group_x + builder.sx(90000), user_group_y + builder.sy(390000), builder.sx(200000), builder.sy(200000), ICON_TARGETS["pc"], name="PCIcon")
-        builder.add_round_rect(user_group_x, user_group_y, builder.sx(420000), builder.sy(760000), None, ZONE_BORDER, paragraphs=None, border_width=THIN_LINE, name="UserGroup", shape="rect", dash="dash")
-        builder.add_text_box(user_group_x + builder.sx(10000), user_group_y + builder.sy(290000), builder.sx(360000), builder.sy(100000), [{"text": "Mobile", "size": 520, "color": BODY_TEXT, "bold": True}], name="MobileText")
-        builder.add_text_box(user_group_x + builder.sx(10000), user_group_y + builder.sy(610000), builder.sx(360000), builder.sy(100000), [{"text": "PC", "size": 520, "color": BODY_TEXT, "bold": True}], name="PCText")
+        builder.add_image(user_group_x + builder.sx(90000), user_group_y + builder.sy(70000), builder.cm(SMALL_ICON_CM), builder.cm(SMALL_ICON_CM), ICON_TARGETS["mobile"], name="MobileIcon")
+        builder.add_image(user_group_x + builder.sx(90000), user_group_y + builder.sy(390000), builder.cm(SMALL_ICON_CM), builder.cm(SMALL_ICON_CM), ICON_TARGETS["pc"], name="PCIcon")
+        builder.add_round_rect(user_group_x, user_group_y, builder.sx(420000), builder.sy(860000), None, ZONE_BORDER, paragraphs=None, border_width=THIN_LINE, name="UserGroup", shape="rect", dash="dash")
+        builder.add_text_box(user_group_x + builder.sx(10000), user_group_y + builder.sy(70000) + builder.cm(SMALL_ICON_CM) + builder.sy(10000), builder.sx(360000), builder.sy(120000), [{"text": "Mobile", "size": STANDARD_ICON_TEXT_SIZE, "color": BODY_TEXT, "bold": True}], name="MobileText", wrap="none")
+        builder.add_text_box(user_group_x + builder.sx(10000), user_group_y + builder.sy(390000) + builder.cm(SMALL_ICON_CM) + builder.sy(10000), builder.sx(360000), builder.sy(120000), [{"text": "PC", "size": STANDARD_ICON_TEXT_SIZE, "color": BODY_TEXT, "bold": True}], name="PCText", wrap="none")
         # Compact single-LB layout for sheets without distinct mobile/pc/internal LB resources.
         lb_rect = (builder.sx(780000) + shift_x, builder.sy(2344028), builder.sx(640000), builder.sy(900000))
         if lb:
             draw_server_group(builder, lb, lb_rect, "FFE5BF", "FF8C00", "FF8C00", "FFFFFF", "FFF2DB", max_servers=1)
-        nginx_rect = (builder.sx(1680000) + shift_x, builder.sy(2225000), builder.sx(720000), builder.sy(1120000))
+        nginx_rect = (builder.sx(1680000) + shift_x, builder.sy(2225000), builder.sx(900000), builder.sy(1180000))
         if nginx:
             draw_server_group(
                 builder,
@@ -1689,22 +1712,22 @@ def render_diagram(title: str, families: dict[str, dict], pods: list[dict], slid
     preview = app_families.get("preview")
     k8s = app_families.get("k8s")
 
-    gpaas_rect = (builder.sx(3273000) + shift_x, builder.sy(1122594), builder.sx(1750000), builder.sy(660200))
+    gpaas_rect = (builder.sx(3273000) + shift_x, builder.sy(1122594), builder.sx(1750000), builder.sy(760000))
     if gpaas:
-        gpaas["fixed_server_card_h"] = featured_card_h
+        gpaas["fixed_server_card_h"] = builder.cm(1.38)
         gpaas["compact_shell"] = True
         draw_server_group(builder, gpaas, gpaas_rect, "DDF5E6", "2E8B57", "2E8B57", "FFFFFF", "EAF9F0", max_servers=1, shell_dash=None, shell_icon_target=ICON_TARGETS["k8s"])
 
-    preview_rect = (builder.sx(5480000) + shift_x, builder.sy(1190731), 1096000, builder.sy(650000))
+    preview_rect = (builder.sx(5480000) + shift_x, builder.sy(1190731), 1096000, builder.sy(760000))
     if preview:
-        preview["fixed_server_card_h"] = builder.cm(1.0)
+        preview["fixed_server_card_h"] = builder.cm(1.18)
         preview["compact_shell"] = True
         draw_server_group(builder, preview, preview_rect, "E4F2EC", "5B8E7D", "006699", "FFFFFF", "D8F3FF", max_servers=1)
 
     cluster_rect = (builder.sx(3000000) + shift_x, builder.sy(2100000), builder.sx(4400000), builder.sy(1680000))
     if k8s:
         builder.add_round_rect(*cluster_rect, "FFFFFF", ZONE_BORDER, paragraphs=None, border_width=ZONE_LINE, name="K8SOuter", shape="rect")
-        builder.add_image(cluster_rect[0] + builder.sx(110000), cluster_rect[1] + builder.sy(70000), builder.sy(220000), builder.sy(220000), "../media/k8s-icon.png", name="K8SIcon")
+        builder.add_image(cluster_rect[0] + builder.sx(110000), cluster_rect[1] + builder.sy(70000), builder.cm(SMALL_ICON_CM), builder.cm(SMALL_ICON_CM), "../media/k8s-icon.png", name="K8SIcon")
         header_lines = [{"text": f'K8S容器集群 ({len(k8s.get("resources", [])) or "?"} 节点)', "size": 1080, "color": TITLE_TEXT, "bold": True}]
         if k8s.get("ports"):
             header_lines.append({"text": f'对外端口 {trim_text(",".join(k8s["ports"][:4]), 22)}', "size": 680, "color": BODY_TEXT})
@@ -1860,14 +1883,43 @@ def render_diagram(title: str, families: dict[str, dict], pods: list[dict], slid
                     builder.add_line_label(start_x, start_y, end_x, end_y, ",".join(family["ports"][:2]), "A23B1E", w=builder.sx(360000), h=builder.sy(130000))
                 connections.append({"from": k8s["display_name"], "to": family["display_name"], "ports": family.get("ports", [])[:2]})
 
+    nfs = families.get("nfs")
+    nfs_rect = None
+    if nfs:
+        nfs["compact_shell"] = True
+        nfs_rect = (
+            cluster_rect[0] + builder.sx(150000),
+            cluster_rect[1] + cluster_rect[3] + builder.sy(130000),
+            builder.sx(1180000),
+            builder.sy(650000),
+        ) if k8s else (
+            builder.sx(5000000),
+            builder.sy(3950000),
+            builder.sx(1180000),
+            builder.sy(650000),
+        )
+        draw_server_group(builder, nfs, nfs_rect, "FFF7D6", "C99700", "FFFFFF", "6B5B00", "6B5B00", max_servers=1)
+        if k8s:
+            line_x = nfs_rect[0] + nfs_rect[2] // 2
+            builder.add_connector(line_x, cluster_rect[1] + cluster_rect[3], line_x, nfs_rect[1], "C99700", name="K8SToNFS")
+            connections.append({"from": k8s["display_name"], "to": nfs["display_name"], "ports": nfs.get("ports", [])[:2]})
+
+    bottom_box = (
+        (nfs_rect[0] if nfs_rect else builder.sx(4450000) + shift_x),
+        (nfs_rect[1] + nfs_rect[3] + builder.sy(240000) if nfs_rect else builder.sy(4480000)),
+        middleware_side_pad * 2 + middleware_cell_w * 2 + middleware_gap_x,
+        builder.sy(1600000),
+    )
+    add_zone(builder, *bottom_box, "中间件", "F6F6F6", "6C757D")
+
     platform_families = [family for family in ordered.get("platform", []) if family["key"] in {"redis", "zookeeper", "mq", "elk"}]
     if platform_families:
         cols = 2 if len(platform_families) <= 4 else 3
         rows_needed = math.ceil(len(platform_families) / cols)
-        gap_x = builder.sx(50000)
-        gap_y = builder.sy(70000)
-        cell_w = builder.cm(10.0)
-        cell_h = (bottom_box[3] - builder.sy(300000) - gap_y * (rows_needed - 1)) // rows_needed
+        gap_x = middleware_gap_x
+        gap_y = middleware_gap_y
+        cell_w = middleware_cell_w
+        cell_h = (bottom_box[3] - builder.sy(220000) - gap_y * (rows_needed - 1)) // rows_needed
 
         color_map = {
             "redis": ("E8F0FF", "3D5A80", "293241"),
@@ -1881,11 +1933,11 @@ def render_diagram(title: str, families: dict[str, dict], pods: list[dict], slid
             row = idx // cols
             family["fixed_server_card_h"] = fixed_card_h
             family["compact_shell"] = True
-            family["side_gap_x"] = builder.sx(30000)
-            family["card_gap_x"] = builder.sx(35000)
+            family["side_gap_x"] = middleware_gap_x
+            family["card_gap_x"] = middleware_gap_x
             rect = (
-                bottom_box[0] + builder.sx(130000) + col * (cell_w + gap_x),
-                bottom_box[1] + builder.sy(150000) + row * (cell_h + gap_y),
+                bottom_box[0] + middleware_side_pad + col * (cell_w + gap_x),
+                bottom_box[1] + builder.sy(100000) + row * (cell_h + gap_y),
                 cell_w,
                 cell_h,
             )
@@ -1913,36 +1965,13 @@ def render_diagram(title: str, families: dict[str, dict], pods: list[dict], slid
                     builder.add_line_label(start_x, start_y, end_x, end_y, ",".join(family["ports"][:2]), border, w=builder.sx(340000), h=builder.sy(130000))
                 connections.append({"from": k8s["display_name"], "to": family["display_name"], "ports": family.get("ports", [])[:3]})
 
-    nfs = families.get("nfs")
-    if nfs:
-        nfs["compact_shell"] = True
-        nfs_rect = (
-            cluster_rect[0] + builder.sx(260000),
-            cluster_rect[1] + cluster_rect[3] + builder.sy(130000),
-            builder.sx(1040000),
-            builder.sy(460000),
-        ) if k8s else (
-            builder.sx(5000000),
-            builder.sy(3950000),
-            builder.sx(1040000),
-            builder.sy(460000),
-        )
-        draw_server_group(builder, nfs, nfs_rect, "FFF7D6", "C99700", "FFFFFF", "6B5B00", "6B5B00", max_servers=1)
-        if k8s:
-            start_x = cluster_rect[0] + cluster_rect[2] // 2
-            start_y = cluster_rect[1] + cluster_rect[3]
-            end_x = nfs_rect[0] + nfs_rect[2] // 2
-            end_y = nfs_rect[1]
-            builder.add_connector(start_x, start_y, end_x, end_y, "C99700", name="K8SToNFS")
-            connections.append({"from": k8s["display_name"], "to": nfs["display_name"], "ports": nfs.get("ports", [])[:2]})
-
     appstore = families.get("appstore")
     if appstore and nginx_rect:
         appstore_rect = (
             nginx_rect[0] + builder.sx(40000),
             nginx_rect[1] + nginx_rect[3] + builder.sy(140000),
-            builder.sx(620000),
-            builder.sy(310000),
+            builder.sx(760000),
+            builder.sy(460000),
         )
         appstore_lines = [appstore["display_name"]]
         appstore_lines.extend(compact_port_labels(appstore, limit=1))
@@ -1955,8 +1984,7 @@ def render_diagram(title: str, families: dict[str, dict], pods: list[dict], slid
             appstore_lines,
             name="AppStoreStandalone",
             text_color=BODY_TEXT,
-            icon_cap=builder.sy(170000),
-            text_size=460,
+            text_size=STANDARD_ICON_TEXT_SIZE,
         )
         start_x = nginx_rect[0] + nginx_rect[2] // 2
         start_y = nginx_rect[1] + nginx_rect[3]
@@ -1964,7 +1992,7 @@ def render_diagram(title: str, families: dict[str, dict], pods: list[dict], slid
         end_y = appstore_rect[1]
         builder.add_connector(start_x, start_y, end_x, end_y, "2A9D8F", name="NginxToAppStore")
         if appstore.get("ports"):
-            builder.add_line_label(start_x, start_y, end_x, end_y, ",".join(appstore["ports"][:1]), "2A9D8F", w=builder.sx(300000), h=builder.sy(120000), y_offset=-builder.sy(90000))
+            builder.add_line_label(start_x, start_y, end_x, end_y, ",".join(appstore["ports"][:1]), "2A9D8F", w=builder.sx(300000), h=builder.sy(120000), y_offset=-builder.sy(160000))
         connections.append({"from": nginx["display_name"] if nginx else "Nginx", "to": appstore["display_name"], "ports": appstore.get("ports", [])[:1]})
 
     return builder.build(), connections, builder.image_rels
