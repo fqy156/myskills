@@ -31,6 +31,7 @@ NS_XLS = {
 
 BASE_SLIDE_W = 12192000
 BASE_SLIDE_H = 6858000
+ASSET_DIR = SCRIPT_DIR.parent / "assets"
 
 
 def canonical_text(value: str | None) -> str:
@@ -141,6 +142,75 @@ def compact_ip(value: str | None) -> str:
 
 
 PNG_PIXEL = 9525
+THIN_LINE = 9525
+CARD_LINE = 12700
+ZONE_LINE = 15240
+LIGHT_LABEL_W = 400000
+LIGHT_LABEL_H = 130000
+WIRE_COLOR = "4A4A4A"
+ZONE_BORDER = "2F2F2F"
+TITLE_TEXT = "222222"
+BODY_TEXT = "5A5A5A"
+
+ICON_TARGETS = {
+    "user": "../media/user-icon.png",
+    "mobile": "../media/mobile-icon.png",
+    "pc": "../media/pc-icon.png",
+    "firewall": "../media/firewall-icon.png",
+    "lb": "../media/lb-icon.png",
+    "nginx": "../media/nginx-icon.png",
+    "server": "../media/server-icon.png",
+    "k8s": "../media/k8s-icon.png",
+    "k8s_node": "../media/k8s-node-icon.png",
+    "pod": "../media/pod-icon.png",
+    "redis": "../media/redis-icon.png",
+    "zookeeper": "../media/zookeeper-icon.png",
+    "mq": "../media/mq-icon.png",
+    "elk": "../media/elk-icon.png",
+    "pg": "../media/db-icon.png",
+    "mdd": "../media/mdd-icon.png",
+    "nfs": "../media/nas-icon.png",
+    "appstore": "../media/appstore-icon.png",
+    "preview": "../media/preview-icon.png",
+}
+
+ICON_TARGET_TO_SOURCE = {
+    ICON_TARGETS["user"]: ASSET_DIR / "用户.png",
+    ICON_TARGETS["mobile"]: ASSET_DIR / "mobile.png",
+    ICON_TARGETS["pc"]: ASSET_DIR / "pc.png",
+    ICON_TARGETS["firewall"]: ASSET_DIR / "防火墙.png",
+    ICON_TARGETS["lb"]: ASSET_DIR / "负载均衡.png",
+    ICON_TARGETS["nginx"]: ASSET_DIR / "nginx.png",
+    ICON_TARGETS["server"]: ASSET_DIR / "服务器.png",
+    ICON_TARGETS["k8s"]: ASSET_DIR / "K8S.png",
+    ICON_TARGETS["k8s_node"]: ASSET_DIR / "k8s-node.png",
+    ICON_TARGETS["pod"]: ASSET_DIR / "k8S-pod.png",
+    ICON_TARGETS["redis"]: ASSET_DIR / "redis.png",
+    ICON_TARGETS["zookeeper"]: ASSET_DIR / "zookeeper.png",
+    ICON_TARGETS["mq"]: ASSET_DIR / "mq 消息队列MQ.png",
+    ICON_TARGETS["elk"]: ASSET_DIR / "elk.png",
+    ICON_TARGETS["pg"]: ASSET_DIR / "数据库.png",
+    ICON_TARGETS["mdd"]: ASSET_DIR / "多维数据库.png",
+    ICON_TARGETS["nfs"]: ASSET_DIR / "NAS.png",
+    ICON_TARGETS["appstore"]: ASSET_DIR / "app-store.png",
+    ICON_TARGETS["preview"]: ASSET_DIR / "文件预览.png",
+}
+
+FAMILY_ICON_KEYS = {
+    "lb": "lb",
+    "nginx": "nginx",
+    "gpaas": "k8s",
+    "k8s": "k8s",
+    "redis": "redis",
+    "zookeeper": "zookeeper",
+    "mq": "mq",
+    "elk": "elk",
+    "pg": "pg",
+    "mdd": "mdd",
+    "nfs": "nfs",
+    "appstore": "appstore",
+    "preview": "preview",
+}
 
 
 def resource_spec(resource: dict) -> str:
@@ -203,6 +273,27 @@ def family_display_name(key: str, services: list[dict]) -> str:
     if services and services[0].get("name"):
         return services[0]["name"]
     return key or "服务"
+
+
+def split_lb_roles(family: dict | None) -> tuple[list[dict], dict | None]:
+    if not family:
+        return [], None
+    external = []
+    internal = None
+    for resource in family.get("resources", []):
+        merged = canonical_text(" ".join([resource.get("name", ""), resource.get("purpose", "")]))
+        if "masterblb" in merged or ("内部" in (resource.get("purpose") or "") and "lb" in merged):
+            internal = resource
+        elif "移动" in (resource.get("name") or "") or "pc" in merged or "lb" in merged:
+            external.append(resource)
+    if not internal and external:
+        for resource in list(external):
+            merged = canonical_text(" ".join([resource.get("name", ""), resource.get("purpose", "")]))
+            if "k8s" in merged:
+                internal = resource
+                external.remove(resource)
+                break
+    return external[:2], internal
 
 
 def infer_resource_group(resource: dict) -> str:
@@ -433,17 +524,31 @@ def parse_simple_resource_sheet(rows: list[list[str]]) -> list[dict]:
     resources = []
     current_env = ""
     current_name = ""
+    header = rows[0] if rows else []
+    header_map = {canonical_text(value): index for index, value in enumerate(header)}
+
+    env_idx = header_map.get(canonical_text("环境"), 0)
+    name_idx = header_map.get(canonical_text("资产名称"), 1)
+    type_idx = header_map.get(canonical_text("资源类型"), 2)
+    ip_idx = header_map.get(canonical_text("IP"), 3)
+    port_idx = header_map.get(canonical_text("端口"), 4)
+    cpu_idx = header_map.get(canonical_text("CPU"), 5)
+    memory_idx = header_map.get(canonical_text("内存"), 6)
+    system_disk_idx = header_map.get(canonical_text("系统盘"), 7)
+    data_disk_idx = header_map.get(canonical_text("数据盘"), 8)
+    remark_idx = header_map.get(canonical_text("备注"), 10)
 
     for row in rows[1:]:
-        env = get_cell(row, 0)
-        asset_name = get_cell(row, 1)
-        endpoints = split_endpoint_parts(get_cell(row, 2))
-        ports = parse_port_entries(get_cell(row, 3))
-        cpu = normalize_capacity(get_cell(row, 4), "C")
-        memory = normalize_capacity(get_cell(row, 5), "G")
-        system_disk = normalize_capacity(get_cell(row, 6), "G")
-        data_disk = normalize_capacity(get_cell(row, 7), "G")
-        remark = get_cell(row, 9)
+        env = get_cell(row, env_idx)
+        asset_name = get_cell(row, name_idx)
+        resource_type = get_cell(row, type_idx)
+        endpoints = split_endpoint_parts(get_cell(row, ip_idx))
+        ports = parse_port_entries(get_cell(row, port_idx))
+        cpu = normalize_capacity(get_cell(row, cpu_idx), "C")
+        memory = normalize_capacity(get_cell(row, memory_idx), "G")
+        system_disk = normalize_capacity(get_cell(row, system_disk_idx), "G")
+        data_disk = normalize_capacity(get_cell(row, data_disk_idx), "G")
+        remark = get_cell(row, remark_idx)
 
         if env:
             current_env = env
@@ -465,7 +570,7 @@ def parse_simple_resource_sheet(rows: list[list[str]]) -> list[dict]:
             record = {
                 "env": current_env,
                 "purpose": " ".join([base_name, remark]).strip(),
-                "resource_type": "服务器",
+                "resource_type": resource_type or "服务器",
                 "name": name,
                 "os_version": "",
                 "ip": ip_value,
@@ -912,10 +1017,11 @@ class SlideBuilder:
             return "<a:noFill/>"
         return f'<a:solidFill><a:srgbClr val="{color}"/></a:solidFill>'
 
-    def _line_xml(self, color: str | None, width: int) -> str:
+    def _line_xml(self, color: str | None, width: int, dash: str | None = None) -> str:
         if not color:
             return "<a:ln><a:noFill/></a:ln>"
-        return f'<a:ln w="{width}"><a:solidFill><a:srgbClr val="{color}"/></a:solidFill></a:ln>'
+        dash_xml = f'<a:prstDash val="{dash}"/>' if dash else ""
+        return f'<a:ln w="{width}"><a:solidFill><a:srgbClr val="{color}"/></a:solidFill>{dash_xml}</a:ln>'
 
     def _paragraph_xml(self, text: str, size: int, color: str, bold: bool = False, align: str = "ctr") -> str:
         bold_flag = ' b="1"' if bold else ""
@@ -959,15 +1065,17 @@ class SlideBuilder:
         fill: str | None,
         border: str | None,
         paragraphs: list[dict] | None = None,
-        border_width: int = 25400,
+        border_width: int = CARD_LINE,
         name: str = "Rounded Rectangle",
+        shape: str = "roundRect",
+        dash: str | None = None,
     ) -> None:
         shape_id = self._new_id()
         self.parts.append(
             f'<p:sp>'
             f'<p:nvSpPr><p:cNvPr id="{shape_id}" name="{escape(name)}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>'
             f'<p:spPr><a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm>'
-            f'<a:prstGeom prst="roundRect"><a:avLst/></a:prstGeom>{self._solid_fill(fill)}{self._line_xml(border, border_width)}</p:spPr>'
+            f'<a:prstGeom prst="{shape}"><a:avLst/></a:prstGeom>{self._solid_fill(fill)}{self._line_xml(border, border_width, dash=dash)}</p:spPr>'
             f'{self._text_body(paragraphs)}</p:sp>'
         )
 
@@ -999,20 +1107,22 @@ class SlideBuilder:
         color: str,
         w: int | None = None,
         h: int | None = None,
+        x_offset: int = 0,
+        y_offset: int = 0,
     ) -> None:
-        label_w = w or self.sx(400000)
-        label_h = h or self.sy(150000)
-        mid_x = (x1 + x2) // 2 - label_w // 2
-        mid_y = (y1 + y2) // 2 - label_h // 2
+        label_w = w or self.sx(LIGHT_LABEL_W)
+        label_h = h or self.sy(LIGHT_LABEL_H)
+        mid_x = (x1 + x2) // 2 - label_w // 2 + x_offset
+        mid_y = (y1 + y2) // 2 - label_h // 2 + y_offset
         self.add_round_rect(
             mid_x,
             mid_y,
             label_w,
             label_h,
             "FFFFFF",
-            color,
-            [{"text": trim_text(text, 14), "size": 540, "color": color, "bold": True}],
-            border_width=12700,
+            None,
+            [{"text": trim_text(text, 14), "size": 460, "color": WIRE_COLOR, "bold": False}],
+            border_width=THIN_LINE,
             name="LineLabel",
         )
 
@@ -1023,8 +1133,9 @@ class SlideBuilder:
         x2: int,
         y2: int,
         color: str,
-        width: int = 25400,
+        width: int = THIN_LINE,
         arrow: bool = True,
+        name: str | None = None,
     ) -> None:
         shape_id = self._new_id()
         off_x = min(x1, x2)
@@ -1034,13 +1145,28 @@ class SlideBuilder:
         flip_h = ' flipH="1"' if x1 > x2 else ""
         flip_v = ' flipV="1"' if y1 > y2 else ""
         tail_end = '<a:tailEnd type="stealth"/>' if arrow else ""
+        shape_name = escape(name or f"Connector {shape_id}")
         self.parts.append(
             f'<p:cxnSp>'
-            f'<p:nvCxnSpPr><p:cNvPr id="{shape_id}" name="Connector {shape_id}"/><p:cNvCxnSpPr/><p:nvPr/></p:nvCxnSpPr>'
+            f'<p:nvCxnSpPr><p:cNvPr id="{shape_id}" name="{shape_name}"/><p:cNvCxnSpPr/><p:nvPr/></p:nvCxnSpPr>'
             f'<p:spPr><a:xfrm{flip_h}{flip_v}><a:off x="{off_x}" y="{off_y}"/><a:ext cx="{ext_x}" cy="{ext_y}"/></a:xfrm>'
             f'<a:prstGeom prst="line"><a:avLst/></a:prstGeom>'
             f'<a:ln w="{width}"><a:solidFill><a:srgbClr val="{color}"/></a:solidFill>{tail_end}</a:ln></p:spPr>'
             f'</p:cxnSp>'
+        )
+
+    def add_vertical_line(self, x: int, y1: int, y2: int, color: str, width: int = THIN_LINE, arrow: bool = True, name: str = "VerticalLine") -> None:
+        top = min(y1, y2)
+        height = max(abs(y2 - y1), 12700)
+        tail_end = '<a:tailEnd type="stealth"/>' if arrow else ""
+        shape_id = self._new_id()
+        self.parts.append(
+            f'<p:sp>'
+            f'<p:nvSpPr><p:cNvPr id="{shape_id}" name="{escape(name)}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>'
+            f'<p:spPr><a:xfrm><a:off x="{x}" y="{top}"/><a:ext cx="{width}" cy="{height}"/></a:xfrm>'
+            f'<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/>'
+            f'<a:ln w="{width}"><a:solidFill><a:srgbClr val="{color}"/></a:solidFill>{tail_end}</a:ln></p:spPr>'
+            f'</p:sp>'
         )
 
     def add_image(self, x: int, y: int, cx: int, cy: int, target: str, name: str = "Picture") -> None:
@@ -1054,6 +1180,70 @@ class SlideBuilder:
             f'<p:spPr><a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr>'
             f'</p:pic>'
         )
+
+    def add_icon_card(
+        self,
+        x: int,
+        y: int,
+        cx: int,
+        cy: int,
+        icon_target: str,
+        detail_lines: list[str],
+        border: str,
+        fill: str = "FFFFFF",
+        name: str = "IconCard",
+    ) -> None:
+        self.add_round_rect(x, y, cx, cy, fill, border, paragraphs=None, border_width=THIN_LINE, name=f"{name}Shell")
+        icon_box = min(cx - self.sx(100000), cy - self.sy(180000), self.sy(330000))
+        icon_x = x + (cx - icon_box) // 2
+        icon_y = y + self.sy(40000)
+        self.add_image(icon_x, icon_y, icon_box, icon_box, icon_target, name=f"{name}Icon")
+        text_y = icon_y + icon_box + self.sy(20000)
+        text_h = max(self.sy(120000), y + cy - text_y - self.sy(30000))
+        paragraphs = [{"text": trim_text(line, 18), "size": 500, "color": "495057", "bold": False} for line in detail_lines if line]
+        if not paragraphs:
+            paragraphs = [{"text": "-", "size": 520, "color": "495057"}]
+        self.add_text_box(x + self.sx(30000), text_y, cx - self.sx(60000), text_h, paragraphs, name=f"{name}Text")
+
+    def add_icon_label(
+        self,
+        x: int,
+        y: int,
+        cx: int,
+        cy: int,
+        icon_target: str,
+        detail_lines: list[str],
+        name: str = "IconLabel",
+        text_color: str = BODY_TEXT,
+        icon_cap: int | None = None,
+        text_size: int = 500,
+        frame: bool = False,
+        frame_color: str = ZONE_BORDER,
+    ) -> None:
+        if frame:
+            self.add_round_rect(
+                x,
+                y,
+                cx,
+                cy,
+                None,
+                frame_color,
+                paragraphs=None,
+                border_width=THIN_LINE,
+                name=f"{name}Frame",
+                shape="rect",
+                dash="dash",
+            )
+        icon_box = min(cx, max(self.sy(200000), cy - self.sy(140000)), icon_cap or self.sy(320000))
+        icon_x = x + (cx - icon_box) // 2
+        icon_y = y + self.sy(10000)
+        self.add_image(icon_x, icon_y, icon_box, icon_box, icon_target, name=f"{name}Icon")
+        text_y = icon_y + icon_box + self.sy(10000)
+        text_h = max(self.sy(100000), y + cy - text_y)
+        paragraphs = [{"text": trim_text(line, 18), "size": text_size, "color": text_color, "bold": False} for line in detail_lines if line]
+        if not paragraphs:
+            paragraphs = [{"text": "-", "size": text_size, "color": text_color}]
+        self.add_text_box(x, text_y, cx, text_h, paragraphs, name=f"{name}Text")
 
     def build(self) -> str:
         return (
@@ -1112,6 +1302,45 @@ def server_box_paragraphs(
     if spec:
         lines.append({"text": trim_text(spec, 24 if small else 28), "size": spec_size, "color": body_color})
     return lines[:4]
+
+
+def icon_detail_lines(resource: dict, only_ip: bool = False) -> list[str]:
+    lines = []
+    ip_text = compact_ip(resource.get("ip") or "-")
+    if ip_text:
+        lines.append(ip_text)
+    if not only_ip:
+        spec = resource_spec(resource)
+        if spec:
+            lines.append(trim_text(spec, 18))
+    return lines[:2]
+
+
+def resource_icon_target(resource: dict, fallback: str) -> str:
+    kind = canonical_text(resource.get("resource_type", ""))
+    if "云服务" in (resource.get("resource_type") or ""):
+        return ICON_TARGETS.get(FAMILY_ICON_KEYS.get(fallback, fallback), ICON_TARGETS["server"])
+    if any(token in kind for token in ("服务器", "虚拟机", "ecs主机", "ecs", "主机")):
+        return ICON_TARGETS["server"]
+    return ICON_TARGETS["server"]
+
+
+def pod_icon_lines(pod: dict) -> list[str]:
+    lines = []
+    title = pod.get("name") or "Pod"
+    if pod.get("replicas"):
+        title = f'{title} x{pod["replicas"]}'
+    lines.append(trim_text(title, 16))
+    spec_bits = []
+    if pod.get("cpu"):
+        spec_bits.append(f'{pod["cpu"]}C')
+    if pod.get("memory"):
+        spec_bits.append(f'{pod["memory"]}G')
+    if spec_bits:
+        lines.append(trim_text(" ".join(spec_bits), 16))
+    elif pod.get("external_port"):
+        lines.append(trim_text(str(pod["external_port"]), 16))
+    return lines[:2]
 
 
 def service_box_paragraphs(family: dict, title_color: str, body_color: str, include_ports: bool = True) -> list[dict]:
@@ -1190,13 +1419,25 @@ def group_and_order_families(families: dict[str, dict]) -> dict[str, list[dict]]
 
 
 def add_zone(builder: SlideBuilder, x: int, y: int, w: int, h: int, label: str, fill: str, border: str) -> None:
-    builder.add_round_rect(x, y, w, h, fill, border, paragraphs=None, border_width=19050, name=f"{label}Zone")
+    builder.add_round_rect(
+        x,
+        y,
+        w,
+        h,
+        "FFFFFF",
+        ZONE_BORDER,
+        paragraphs=None,
+        border_width=ZONE_LINE,
+        name=f"{label}Zone",
+        shape="rect",
+        dash="dash",
+    )
     builder.add_text_box(
         x + builder.sx(120000),
         y - builder.sy(180000),
         builder.sx(1600000),
         builder.sy(260000),
-        [{"text": label, "size": 1250, "color": border, "bold": True, "align": "l"}],
+        [{"text": label, "size": 1250, "color": TITLE_TEXT, "bold": True, "align": "l"}],
         name=f"{label}Label",
     )
 
@@ -1213,21 +1454,45 @@ def draw_server_group(
     max_servers: int = 3,
     include_ports_in_boxes: bool = True,
     layout: str = "horizontal",
+    shell_dash: str | None = "dash",
+    shell_icon_target: str | None = None,
 ) -> tuple[int, int, int, int]:
     x, y, w, h = rect
+    icon_target = ICON_TARGETS.get(FAMILY_ICON_KEYS.get(family["key"], "k8s"), ICON_TARGETS["k8s"])
     compact_shell = bool(family.get("compact_shell"))
-    title_h = builder.sy(180000 if compact_shell else 240000)
-    top_gap = builder.sy(40000 if compact_shell else 70000)
-    side_gap = builder.sx(80000 if compact_shell else 90000)
-    content_gap = builder.sy(70000 if compact_shell else 150000)
-    bottom_pad = builder.sy(140000 if compact_shell else 240000)
-    builder.add_round_rect(x, y, w, h, shell_fill, shell_border, paragraphs=None, border_width=19050, name=f'{family["key"]}Shell')
+    title_h = builder.sy(160000 if compact_shell else 220000)
+    top_gap = builder.sy(20000 if compact_shell else 40000)
+    side_gap = int(family.get("side_gap_x", builder.sx(50000 if compact_shell else 70000)))
+    content_gap = builder.sy(30000 if compact_shell else 90000)
+    bottom_pad = builder.sy(90000 if compact_shell else 160000)
+    builder.add_round_rect(
+        x,
+        y,
+        w,
+        h,
+        None,
+        ZONE_BORDER,
+        paragraphs=None,
+        border_width=THIN_LINE,
+        name=f'{family["key"]}Shell',
+        shape="rect",
+        dash=shell_dash,
+    )
+    if shell_icon_target:
+        builder.add_image(
+            x + builder.sx(50000),
+            y + builder.sy(10000),
+            builder.sy(180000),
+            builder.sy(180000),
+            shell_icon_target,
+            name=f'{family["key"]}ShellIcon',
+        )
     builder.add_text_box(
-        x + side_gap,
+        x + (builder.sx(220000) if shell_icon_target else 0),
         y + top_gap,
-        w - side_gap * 2,
+        w - (builder.sx(220000) if shell_icon_target else 0),
         title_h,
-        [{"text": trim_text(family["display_name"], 18), "size": 880, "color": shell_border, "bold": True, "align": "l"}],
+        [{"text": trim_text(family["display_name"], 18), "size": 880, "color": TITLE_TEXT, "bold": True, "align": "l"}],
         name=f'{family["key"]}Title',
     )
 
@@ -1248,60 +1513,46 @@ def draw_server_group(
             card_w = inner_w
             for idx, resource in enumerate(resources):
                 ry = inner_y + idx * (card_h + gap)
-                builder.add_round_rect(
+                builder.add_icon_label(
                     inner_x,
                     ry,
                     card_w,
                     card_h,
-                    server_fill,
-                    shell_border,
-                    server_box_paragraphs(
-                        resource,
-                        compact_port_labels(family, limit=2),
-                        title_color,
-                        body_color,
-                        small=True,
-                        include_ports=include_ports_in_boxes,
-                    ),
-                    border_width=12700,
+                    resource_icon_target(resource, family["key"]),
+                    icon_detail_lines(resource),
                     name=f'{family["key"]}Server{idx+1}',
+                    text_color=BODY_TEXT,
+                    icon_cap=builder.sy(300000),
                 )
         else:
             cols = min(len(resources), 3)
-            gap = builder.sx(70000)
+            gap = int(family.get("card_gap_x", builder.sx(70000)))
             card_w = (inner_w - gap * max(cols - 1, 0)) // max(cols, 1)
             card_h = min(fixed_card_h, inner_h) if fixed_card_h else inner_h
             for idx, resource in enumerate(resources):
                 rx = inner_x + idx * (card_w + gap)
-                builder.add_round_rect(
+                builder.add_icon_label(
                     rx,
                     inner_y,
                     card_w,
                     card_h,
-                    server_fill,
-                    shell_border,
-                    server_box_paragraphs(
-                        resource,
-                        compact_port_labels(family, limit=2),
-                        title_color,
-                        body_color,
-                        small=True,
-                        include_ports=include_ports_in_boxes,
-                    ),
-                    border_width=12700,
+                    resource_icon_target(resource, family["key"]),
+                    icon_detail_lines(resource),
                     name=f'{family["key"]}Server{idx+1}',
+                    text_color=BODY_TEXT,
+                    icon_cap=builder.sy(300000),
                 )
     else:
-        builder.add_round_rect(
-            x + builder.sx(120000),
+        builder.add_icon_label(
+            x + side_gap,
             y + title_h + content_gap,
-            w - builder.sx(240000),
+            w - side_gap * 2,
             h - title_h - (bottom_pad + builder.sy(20000)),
-            server_fill,
-            shell_border,
-            service_box_paragraphs(family, title_color, body_color, include_ports=include_ports_in_boxes),
-            border_width=12700,
+            icon_target,
+            [family["display_name"]] + compact_port_labels(family, limit=1),
             name=f'{family["key"]}ServiceOnly',
+            text_color=BODY_TEXT,
+            icon_cap=builder.sy(320000),
         )
     return rect
 
@@ -1326,166 +1577,257 @@ def render_diagram(title: str, families: dict[str, dict], pods: list[dict], slid
     access_box = (builder.sx(420000) + shift_x, builder.sy(1120000), builder.sx(2200000), builder.sy(2500000))
     app_box = (builder.sx(2850000) + shift_x, builder.sy(1120000), builder.sx(4650000), builder.sy(3100000))
     data_box = (builder.sx(7750000) + shift_x, builder.sy(1120000), builder.sx(3400000), builder.sy(3100000))
-    bottom_box = (builder.sx(1950000) + shift_x, builder.sy(4420000), builder.sx(9250000), builder.sy(1950000))
+    bottom_box = (builder.sx(2300000) + shift_x, builder.sy(4550000), builder.cm(20.6), builder.sy(1820000))
 
-    add_zone(builder, *access_box, "接入区", "FFF4E6", "E67E22")
-    add_zone(builder, *app_box, "应用区", "F4F8FC", "214D8A")
-    add_zone(builder, *data_box, "数据区", "F8F4F2", "A23B1E")
-    add_zone(builder, *bottom_box, "平台服务区", "F6F6F6", "6C757D")
-
-    user_x = builder.sx(70000)
-    user_y = builder.sy(2150000)
-    user_w = builder.sx(500000)
-    user_h = builder.sy(420000)
-    builder.add_round_rect(
-        user_x,
-        user_y,
-        user_w,
-        user_h,
-        "214D8A",
-        "214D8A",
-        [{"text": "用户入口", "size": 820, "color": "FFFFFF", "bold": True}],
-        border_width=12700,
-        name="User",
-    )
-    builder.add_image(user_x - builder.sx(220000), user_y + builder.sy(20000), builder.sx(180000), builder.sy(180000), "../media/user-icon.png", name="UserIcon")
+    add_zone(builder, *bottom_box, "中间件", "F6F6F6", "6C757D")
 
     access_families = {family["key"]: family for family in ordered.get("access", [])}
     lb = access_families.get("lb")
     nginx = access_families.get("nginx")
+    external_lbs, internal_lb = split_lb_roles(lb)
 
-    lb_rect = (builder.sx(760000) + shift_x, builder.sy(1520000), builder.sx(560000), builder.sy(1280000))
-    if lb:
-        draw_server_group(builder, lb, lb_rect, "FFE5BF", "FF8C00", "FF8C00", "FFFFFF", "FFF2DB", max_servers=1)
+    lb_rect = None
+    mobile_lb_rect = None
+    pc_lb_rect = None
+    internal_lb_rect = None
+    nginx_rect = None
+    has_multi_lb_layout = bool(lb and external_lbs)
+    if has_multi_lb_layout:
+        mobile_lb_rect = (builder.sx(1100000) + shift_x, builder.sy(1820000), builder.sx(720000), builder.sy(520000))
+        pc_lb_rect = (builder.sx(1100000) + shift_x, builder.sy(2440000), builder.sx(720000), builder.sy(520000))
+        internal_lb_rect = (builder.sx(2100000) + shift_x, builder.sy(2130000), builder.sx(760000), builder.sy(620000))
+        mobile_lb = {"key": "lb", "display_name": external_lbs[0].get("name") or "移动LB", "resources": [external_lbs[0]]}
+        draw_server_group(builder, mobile_lb, mobile_lb_rect, "FFE5BF", "FF8C00", "FF8C00", "FFFFFF", "FFF2DB", max_servers=1)
+        if len(external_lbs) > 1:
+            pc_lb = {"key": "lb", "display_name": external_lbs[1].get("name") or "PC端LB", "resources": [external_lbs[1]]}
+            draw_server_group(builder, pc_lb, pc_lb_rect, "FFE5BF", "FF8C00", "FF8C00", "FFFFFF", "FFF2DB", max_servers=1)
+        if internal_lb:
+            inner_family = {"key": "lb", "display_name": internal_lb.get("name") or "内部LB", "resources": [internal_lb]}
+            draw_server_group(builder, inner_family, internal_lb_rect, "FFE5BF", "FF8C00", "FF8C00", "FFFFFF", "FFF2DB", max_servers=1)
+        nginx_rect = (builder.sx(2500000) + shift_x, builder.sy(2180000), builder.sx(760000), builder.sy(1180000))
+        if nginx:
+            draw_server_group(
+                builder,
+                nginx,
+                nginx_rect,
+                "D7EEF9",
+                "006699",
+                "006699",
+                "FFFFFF",
+                "D8F3FF",
+                max_servers=2,
+                layout="vertical",
+            )
 
-    nginx_rect = (builder.sx(1420000) + shift_x, builder.sy(1380000), builder.sx(980000), builder.sy(1500000))
-    if nginx:
-        draw_server_group(
-            builder,
-            nginx,
-            nginx_rect,
-            "D7EEF9",
-            "006699",
-            "006699",
-            "FFFFFF",
-            "D8F3FF",
-            max_servers=2,
-            layout="vertical",
-        )
-
-    builder.add_connector(user_x + user_w, user_y + user_h // 2, lb_rect[0], lb_rect[1] + lb_rect[3] // 2, "FF8C00")
+    if has_multi_lb_layout:
+        user_group_x = builder.sx(260000)
+        user_group_y = builder.sy(2160000)
+        user_group_w = builder.sx(420000)
+        user_group_h = builder.sy(760000)
+        mobile_user_y = user_group_y + builder.sy(70000)
+        pc_user_y = user_group_y + builder.sy(390000)
+        builder.add_round_rect(user_group_x, user_group_y, user_group_w, user_group_h, None, ZONE_BORDER, paragraphs=None, border_width=THIN_LINE, name="UserGroup", shape="rect", dash="dash")
+        builder.add_image(user_group_x + builder.sx(90000), mobile_user_y, builder.sx(200000), builder.sy(200000), ICON_TARGETS["mobile"], name="MobileIcon")
+        builder.add_image(user_group_x + builder.sx(90000), pc_user_y, builder.sx(200000), builder.sy(200000), ICON_TARGETS["pc"], name="PCIcon")
+        builder.add_text_box(user_group_x + builder.sx(10000), mobile_user_y + builder.sy(210000), builder.sx(360000), builder.sy(100000), [{"text": "Mobile", "size": 520, "color": BODY_TEXT, "bold": True}], name="MobileText")
+        builder.add_text_box(user_group_x + builder.sx(10000), pc_user_y + builder.sy(210000), builder.sx(360000), builder.sy(100000), [{"text": "PC", "size": 520, "color": BODY_TEXT, "bold": True}], name="PCText")
+        builder.add_connector(user_group_x + user_group_w, mobile_user_y + builder.sy(100000), mobile_lb_rect[0], mobile_lb_rect[1] + builder.sy(160000), "FF8C00")
+        if len(external_lbs) > 1:
+            builder.add_connector(user_group_x + user_group_w, pc_user_y + builder.sy(100000), pc_lb_rect[0], pc_lb_rect[1] + builder.sy(160000), "FF8C00")
+        if internal_lb:
+            builder.add_connector(mobile_lb_rect[0] + mobile_lb_rect[2], mobile_lb_rect[1] + builder.sy(160000), internal_lb_rect[0], internal_lb_rect[1] + builder.sy(160000), "FF8C00")
+            if len(external_lbs) > 1:
+                builder.add_connector(pc_lb_rect[0] + pc_lb_rect[2], pc_lb_rect[1] + builder.sy(160000), internal_lb_rect[0], internal_lb_rect[1] + builder.sy(460000), "FF8C00")
+    else:
+        user_group_x = builder.sx(280000)
+        user_group_y = builder.sy(2436428)
+        builder.add_image(user_group_x + builder.sx(90000), user_group_y + builder.sy(70000), builder.sx(200000), builder.sy(200000), ICON_TARGETS["mobile"], name="MobileIcon")
+        builder.add_image(user_group_x + builder.sx(90000), user_group_y + builder.sy(390000), builder.sx(200000), builder.sy(200000), ICON_TARGETS["pc"], name="PCIcon")
+        builder.add_round_rect(user_group_x, user_group_y, builder.sx(420000), builder.sy(760000), None, ZONE_BORDER, paragraphs=None, border_width=THIN_LINE, name="UserGroup", shape="rect", dash="dash")
+        builder.add_text_box(user_group_x + builder.sx(10000), user_group_y + builder.sy(290000), builder.sx(360000), builder.sy(100000), [{"text": "Mobile", "size": 520, "color": BODY_TEXT, "bold": True}], name="MobileText")
+        builder.add_text_box(user_group_x + builder.sx(10000), user_group_y + builder.sy(610000), builder.sx(360000), builder.sy(100000), [{"text": "PC", "size": 520, "color": BODY_TEXT, "bold": True}], name="PCText")
+        # Compact single-LB layout for sheets without distinct mobile/pc/internal LB resources.
+        lb_rect = (builder.sx(780000) + shift_x, builder.sy(2344028), builder.sx(640000), builder.sy(900000))
+        if lb:
+            draw_server_group(builder, lb, lb_rect, "FFE5BF", "FF8C00", "FF8C00", "FFFFFF", "FFF2DB", max_servers=1)
+        nginx_rect = (builder.sx(1680000) + shift_x, builder.sy(2225000), builder.sx(720000), builder.sy(1120000))
+        if nginx:
+            draw_server_group(
+                builder,
+                nginx,
+                nginx_rect,
+                "D7EEF9",
+                "006699",
+                "006699",
+                "FFFFFF",
+                "D8F3FF",
+                max_servers=2,
+                layout="vertical",
+            )
+        access_chain_y = builder.sy(2785000)
+        user_anchor_x = user_group_x + builder.sx(420000)
+        user_anchor_y = access_chain_y
+        builder.add_connector(user_anchor_x, user_anchor_y, lb_rect[0], access_chain_y, "FF8C00")
+        if lb and nginx:
+            builder.add_connector(lb_rect[0] + lb_rect[2], access_chain_y, nginx_rect[0], access_chain_y, "FF8C00")
     if lb and lb.get("ports"):
+        label_target_rect = mobile_lb_rect if has_multi_lb_layout and mobile_lb_rect else lb_rect
         builder.add_line_label(
-            user_x + user_w,
-            user_y + user_h // 2,
-            lb_rect[0],
-            lb_rect[1] + lb_rect[3] // 2,
+            (builder.sx(700000) if has_multi_lb_layout else builder.sx(980000)),
+            (builder.sy(2460000) if has_multi_lb_layout else lb_rect[1] + lb_rect[3] // 2),
+            label_target_rect[0],
+            label_target_rect[1] + label_target_rect[3] // 2,
             ",".join(lb["ports"][:2]),
             "A23B1E",
-            w=builder.sx(450000),
+            w=builder.sx(360000),
+            y_offset=-builder.sy(120000),
         )
         connections.append({"from": "用户", "to": lb["display_name"], "ports": lb["ports"][:2]})
-
-    if lb and nginx:
-        builder.add_connector(lb_rect[0] + lb_rect[2], lb_rect[1] + lb_rect[3] // 2, nginx_rect[0], nginx_rect[1] + nginx_rect[3] // 2, "FF8C00")
-        connections.append({"from": lb["display_name"], "to": nginx["display_name"], "ports": lb.get("ports", [])[:2]})
 
     app_families = {family["key"]: family for family in ordered.get("application", [])}
     gpaas = app_families.get("gpaas")
     preview = app_families.get("preview")
     k8s = app_families.get("k8s")
 
-    gpaas_rect = (builder.sx(3180000) + shift_x, builder.sy(1280000), builder.sx(1750000), builder.sy(760000))
+    gpaas_rect = (builder.sx(3273000) + shift_x, builder.sy(1122594), builder.sx(1750000), builder.sy(660200))
     if gpaas:
         gpaas["fixed_server_card_h"] = featured_card_h
         gpaas["compact_shell"] = True
-        draw_server_group(builder, gpaas, gpaas_rect, "DDF5E6", "2E8B57", "2E8B57", "FFFFFF", "EAF9F0", max_servers=1)
+        draw_server_group(builder, gpaas, gpaas_rect, "DDF5E6", "2E8B57", "2E8B57", "FFFFFF", "EAF9F0", max_servers=1, shell_dash=None, shell_icon_target=ICON_TARGETS["k8s"])
 
-    preview_rect = (builder.sx(5480000) + shift_x, builder.sy(1310000), 1096000, builder.sy(650000))
+    preview_rect = (builder.sx(5480000) + shift_x, builder.sy(1190731), 1096000, builder.sy(650000))
     if preview:
         preview["fixed_server_card_h"] = builder.cm(1.0)
         preview["compact_shell"] = True
         draw_server_group(builder, preview, preview_rect, "E4F2EC", "5B8E7D", "006699", "FFFFFF", "D8F3FF", max_servers=1)
 
-    cluster_rect = (builder.sx(3000000) + shift_x, builder.sy(2100000), builder.sx(4400000), builder.sy(1900000))
+    cluster_rect = (builder.sx(3000000) + shift_x, builder.sy(2100000), builder.sx(4400000), builder.sy(1680000))
     if k8s:
-        builder.add_round_rect(*cluster_rect, "F0F8FF", "214D8A", paragraphs=None, border_width=25400, name="K8SOuter")
-        builder.add_image(cluster_rect[0] + builder.sx(120000), cluster_rect[1] + builder.sy(70000), builder.sy(220000), builder.sy(220000), "../media/k8s-icon.png", name="K8SIcon")
-        header_lines = [{"text": f'K8S容器集群 ({len(k8s.get("resources", [])) or "?"} 节点)', "size": 1080, "color": "214D8A", "bold": True}]
+        builder.add_round_rect(*cluster_rect, "FFFFFF", ZONE_BORDER, paragraphs=None, border_width=ZONE_LINE, name="K8SOuter", shape="rect")
+        builder.add_image(cluster_rect[0] + builder.sx(110000), cluster_rect[1] + builder.sy(70000), builder.sy(220000), builder.sy(220000), "../media/k8s-icon.png", name="K8SIcon")
+        header_lines = [{"text": f'K8S容器集群 ({len(k8s.get("resources", [])) or "?"} 节点)', "size": 1080, "color": TITLE_TEXT, "bold": True}]
         if k8s.get("ports"):
-            header_lines.append({"text": f'对外端口 {trim_text(",".join(k8s["ports"][:4]), 22)}', "size": 700, "color": "415A77"})
+            header_lines.append({"text": f'对外端口 {trim_text(",".join(k8s["ports"][:4]), 22)}', "size": 680, "color": BODY_TEXT})
         vip_note = ""
         for service in k8s.get("services", []):
             if service.get("vip_hint"):
                 vip_note = service["vip_hint"]
                 break
         if vip_note:
-            header_lines.append({"text": f'API VIP {trim_text(vip_note, 18)}:6443', "size": 660, "color": "415A77"})
+            header_lines.append({"text": f'API VIP {trim_text(vip_note, 18)}:6443', "size": 640, "color": BODY_TEXT})
         builder.add_text_box(
-            cluster_rect[0] + builder.sx(390000),
+            cluster_rect[0] + builder.sx(380000),
             cluster_rect[1] + builder.sy(80000),
-            cluster_rect[2] - builder.sx(530000),
-            builder.sy(460000),
+            cluster_rect[2] - builder.sx(500000),
+            builder.sy(360000),
             header_lines,
             name="K8SHeader",
         )
 
         workers = k8s.get("resources", [])
-        worker_y = cluster_rect[1] + builder.sy(520000)
         worker_gap = builder.sx(100000)
         worker_area_x = cluster_rect[0] + builder.sx(140000)
         worker_area_w = cluster_rect[2] - builder.sx(280000)
+        if pods:
+            pod_area_x = cluster_rect[0] + builder.sx(140000)
+            pod_area_y = cluster_rect[1] + builder.sy(430000)
+            pod_area_w = cluster_rect[2] - builder.sx(280000)
+            pod_area_h = builder.sy(700000)
+            builder.add_round_rect(
+                pod_area_x,
+                pod_area_y,
+                pod_area_w,
+                pod_area_h,
+                "BFDFFF",
+                None,
+                paragraphs=None,
+                border_width=0,
+                name="PodAreaBg",
+                shape="rect",
+            )
+            pod_gap_x = builder.sx(90000)
+            pod_gap_y = builder.sy(90000)
+            max_pod_rows = max(1, (pod_area_h + pod_gap_y) // (fixed_card_h + pod_gap_y))
+            columns = max(1, math.ceil(len(pods) / max_pod_rows))
+            pod_w = (pod_area_w - pod_gap_x * (columns - 1)) // max(columns, 1)
+            pod_h = fixed_card_h
+            for index, pod in enumerate(pods):
+                col = index % columns
+                row = index // columns
+                pod_x = pod_area_x + col * (pod_w + pod_gap_x)
+                pod_y = pod_area_y + row * (pod_h + pod_gap_y)
+                builder.add_icon_label(
+                    pod_x,
+                    pod_y + builder.sy(10000),
+                    pod_w,
+                    pod_h - builder.sy(20000),
+                    ICON_TARGETS["pod"],
+                    pod_icon_lines(pod),
+                    name=f"Pod{index+1}",
+                    text_color=BODY_TEXT,
+                    icon_cap=builder.sy(210000),
+                    text_size=460,
+                )
+            worker_y = pod_area_y + pod_area_h + builder.sy(90000)
+        else:
+            # No pods: give the full content area back to the node grid.
+            worker_y = cluster_rect[1] + builder.sy(470000)
+
+        worker_area_h = max(builder.sy(240000), cluster_rect[1] + cluster_rect[3] - worker_y - builder.sy(110000))
         if len(workers) > 4:
             worker_cols = min(4, len(workers))
             worker_rows = math.ceil(len(workers) / worker_cols)
-            worker_gap_y = builder.sy(50000)
+            worker_gap_y = builder.sy(40000)
             worker_w = (worker_area_w - worker_gap * max(0, worker_cols - 1)) // worker_cols
-            worker_h = builder.sy(260000)
+            available_h = max(builder.sy(180000), worker_area_h - worker_gap_y * max(worker_rows - 1, 0))
+            worker_h = max(builder.sy(180000), available_h // max(worker_rows, 1))
             for idx, worker in enumerate(workers):
                 col = idx % worker_cols
                 row = idx // worker_cols
                 worker_x = worker_area_x + col * (worker_w + worker_gap)
                 worker_box_y = worker_y + row * (worker_h + worker_gap_y)
-                builder.add_round_rect(worker_x, worker_box_y, worker_w, worker_h, "4D81BD", "FFFFFF", worker_ip_only_paragraphs(worker), border_width=12700, name=f"Worker{idx+1}")
-            pod_start_y = worker_y + worker_rows * (worker_h + worker_gap_y) + builder.sy(80000)
+                builder.add_icon_label(worker_x, worker_box_y, worker_w, worker_h, ICON_TARGETS["k8s_node"], icon_detail_lines(worker, only_ip=True), name=f"Worker{idx+1}", text_color=BODY_TEXT, icon_cap=builder.sy(190000), text_size=460)
         else:
             worker_w = (worker_area_w - worker_gap * max(0, len(workers) - 1)) // max(len(workers), 1)
-            worker_h = builder.sy(560000)
+            worker_h = min(builder.sy(620000), worker_area_h)
             for idx, worker in enumerate(workers[:4]):
                 worker_x = worker_area_x + idx * (worker_w + worker_gap)
-                builder.add_round_rect(worker_x, worker_y, worker_w, worker_h, "4D81BD", "FFFFFF", worker_paragraphs(worker), border_width=12700, name=f"Worker{idx+1}")
-            pod_start_y = cluster_rect[1] + builder.sy(1220000)
+                builder.add_icon_label(worker_x, worker_y, worker_w, worker_h, ICON_TARGETS["k8s_node"], icon_detail_lines(worker), name=f"Worker{idx+1}", text_color=BODY_TEXT, icon_cap=builder.sy(210000), text_size=480)
 
-        pod_area_x = cluster_rect[0] + builder.sx(140000)
-        pod_area_y = pod_start_y
-        pod_area_w = cluster_rect[2] - builder.sx(280000)
-        pod_area_h = max(builder.sy(220000), cluster_rect[1] + cluster_rect[3] - pod_area_y - builder.sy(160000))
-        pod_gap_x = builder.sx(90000)
-        pod_gap_y = builder.sy(90000)
-        max_pod_rows = max(1, (pod_area_h + pod_gap_y) // (fixed_card_h + pod_gap_y))
-        columns = max(1, math.ceil(max(len(pods), 1) / max_pod_rows))
-        rows_needed = max(1, math.ceil(max(len(pods), 1) / columns))
-        pod_w = (pod_area_w - pod_gap_x * (columns - 1)) // max(columns, 1)
-        pod_h = fixed_card_h
-        for index, pod in enumerate(pods):
-            col = index % columns
-            row = index // columns
-            pod_x = pod_area_x + col * (pod_w + pod_gap_x)
-            pod_y = pod_area_y + row * (pod_h + pod_gap_y)
-            builder.add_round_rect(pod_x, pod_y, pod_w, pod_h, "E8F3E8", "7AA874", pod_paragraphs(pod), border_width=12700, name=f"Pod{index+1}")
+    if internal_lb and k8s:
+        builder.add_connector(
+            internal_lb_rect[0] + internal_lb_rect[2],
+            internal_lb_rect[1] + builder.sy(310000),
+            cluster_rect[0],
+            internal_lb_rect[1] + builder.sy(310000),
+            "FF8C00",
+        )
+        connections.append({"from": internal_lb.get("name") or "内部LB", "to": k8s["display_name"], "ports": []})
+    elif lb and nginx and has_multi_lb_layout:
+        source_rect = internal_lb_rect if internal_lb else lb_rect
+        builder.add_connector(source_rect[0] + source_rect[2], source_rect[1] + builder.sy(310000), nginx_rect[0], source_rect[1] + builder.sy(310000), "FF8C00")
+        connections.append({"from": lb["display_name"], "to": nginx["display_name"], "ports": lb.get("ports", [])[:2]})
 
     if nginx and k8s:
         start_x = nginx_rect[0] + nginx_rect[2]
-        start_y = nginx_rect[1] + nginx_rect[3] // 2
+        start_y = internal_lb_rect[1] + builder.sy(310000) if internal_lb else builder.sy(2785000)
         end_x = cluster_rect[0]
-        end_y = cluster_rect[1] + cluster_rect[3] // 2
+        end_y = start_y
         builder.add_connector(start_x, start_y, end_x, end_y, "214D8A")
         if k8s.get("ports"):
-            builder.add_line_label(start_x, start_y, end_x, end_y, ",".join(k8s["ports"][:3]), "214D8A", w=builder.sx(560000), h=builder.sy(170000))
+            builder.add_line_label(start_x, start_y, end_x, end_y, ",".join(k8s["ports"][:3]), "214D8A", w=builder.sx(420000), h=builder.sy(130000))
         connections.append({"from": nginx["display_name"], "to": k8s["display_name"], "ports": k8s.get("ports", [])[:3]})
 
     if gpaas and k8s:
-        builder.add_connector(gpaas_rect[0] + gpaas_rect[2] // 2, gpaas_rect[1] + gpaas_rect[3], cluster_rect[0] + builder.sx(520000), cluster_rect[1], "2E8B57")
+        gpaas_line_x = gpaas_rect[0] + gpaas_rect[2] // 2
+        builder.add_connector(
+            gpaas_line_x,
+            gpaas_rect[1] + gpaas_rect[3],
+            gpaas_line_x,
+            cluster_rect[1],
+            "2E8B57",
+            name="GpaasToK8S",
+        )
         connections.append({"from": gpaas["display_name"], "to": k8s["display_name"], "ports": ["6443"]})
 
     if preview and k8s:
@@ -1515,25 +1857,23 @@ def render_diagram(title: str, families: dict[str, dict], pods: list[dict], slid
                 end_y = rect[1] + rect[3] // 2
                 builder.add_connector(start_x, start_y, end_x, end_y, "A23B1E")
                 if family.get("ports"):
-                    builder.add_line_label(start_x, start_y, end_x, end_y, ",".join(family["ports"][:2]), "A23B1E", w=builder.sx(440000), h=builder.sy(150000))
+                    builder.add_line_label(start_x, start_y, end_x, end_y, ",".join(family["ports"][:2]), "A23B1E", w=builder.sx(360000), h=builder.sy(130000))
                 connections.append({"from": k8s["display_name"], "to": family["display_name"], "ports": family.get("ports", [])[:2]})
 
-    platform_families = ordered.get("platform", [])
+    platform_families = [family for family in ordered.get("platform", []) if family["key"] in {"redis", "zookeeper", "mq", "elk"}]
     if platform_families:
-        cols = 3 if len(platform_families) <= 6 else 4
+        cols = 2 if len(platform_families) <= 4 else 3
         rows_needed = math.ceil(len(platform_families) / cols)
-        gap_x = builder.sx(130000)
-        gap_y = builder.sy(120000)
-        cell_w = (bottom_box[2] - builder.sx(260000) - gap_x * (cols - 1)) // cols
-        cell_h = (bottom_box[3] - builder.sy(360000) - gap_y * (rows_needed - 1)) // rows_needed
+        gap_x = builder.sx(50000)
+        gap_y = builder.sy(70000)
+        cell_w = builder.cm(10.0)
+        cell_h = (bottom_box[3] - builder.sy(300000) - gap_y * (rows_needed - 1)) // rows_needed
 
         color_map = {
             "redis": ("E8F0FF", "3D5A80", "293241"),
             "zookeeper": ("E8F0FF", "3D5A80", "293241"),
             "mq": ("FFF1E6", "D97706", "7C2D12"),
             "elk": ("F3F0FF", "4361EE", "2B2D42"),
-            "nfs": ("FFF7D6", "C99700", "6B5B00"),
-            "appstore": ("E7F8F4", "2A9D8F", "1F4E46"),
         }
 
         for idx, family in enumerate(platform_families):
@@ -1541,9 +1881,11 @@ def render_diagram(title: str, families: dict[str, dict], pods: list[dict], slid
             row = idx // cols
             family["fixed_server_card_h"] = fixed_card_h
             family["compact_shell"] = True
+            family["side_gap_x"] = builder.sx(30000)
+            family["card_gap_x"] = builder.sx(35000)
             rect = (
                 bottom_box[0] + builder.sx(130000) + col * (cell_w + gap_x),
-                bottom_box[1] + builder.sy(180000) + row * (cell_h + gap_y),
+                bottom_box[1] + builder.sy(150000) + row * (cell_h + gap_y),
                 cell_w,
                 cell_h,
             )
@@ -1566,10 +1908,64 @@ def render_diagram(title: str, families: dict[str, dict], pods: list[dict], slid
                 start_y = cluster_rect[1] + cluster_rect[3]
                 end_x = rect[0] + rect[2] // 2
                 end_y = rect[1]
-                builder.add_connector(start_x, start_y, end_x, end_y, border, width=19050)
+                builder.add_connector(start_x, start_y, end_x, end_y, border, width=THIN_LINE)
                 if family.get("ports"):
-                    builder.add_line_label(start_x, start_y, end_x, end_y, ",".join(family["ports"][:2]), border, w=builder.sx(420000), h=builder.sy(150000))
+                    builder.add_line_label(start_x, start_y, end_x, end_y, ",".join(family["ports"][:2]), border, w=builder.sx(340000), h=builder.sy(130000))
                 connections.append({"from": k8s["display_name"], "to": family["display_name"], "ports": family.get("ports", [])[:3]})
+
+    nfs = families.get("nfs")
+    if nfs:
+        nfs["compact_shell"] = True
+        nfs_rect = (
+            cluster_rect[0] + builder.sx(260000),
+            cluster_rect[1] + cluster_rect[3] + builder.sy(130000),
+            builder.sx(1040000),
+            builder.sy(460000),
+        ) if k8s else (
+            builder.sx(5000000),
+            builder.sy(3950000),
+            builder.sx(1040000),
+            builder.sy(460000),
+        )
+        draw_server_group(builder, nfs, nfs_rect, "FFF7D6", "C99700", "FFFFFF", "6B5B00", "6B5B00", max_servers=1)
+        if k8s:
+            start_x = cluster_rect[0] + cluster_rect[2] // 2
+            start_y = cluster_rect[1] + cluster_rect[3]
+            end_x = nfs_rect[0] + nfs_rect[2] // 2
+            end_y = nfs_rect[1]
+            builder.add_connector(start_x, start_y, end_x, end_y, "C99700", name="K8SToNFS")
+            connections.append({"from": k8s["display_name"], "to": nfs["display_name"], "ports": nfs.get("ports", [])[:2]})
+
+    appstore = families.get("appstore")
+    if appstore and nginx_rect:
+        appstore_rect = (
+            nginx_rect[0] + builder.sx(40000),
+            nginx_rect[1] + nginx_rect[3] + builder.sy(140000),
+            builder.sx(620000),
+            builder.sy(310000),
+        )
+        appstore_lines = [appstore["display_name"]]
+        appstore_lines.extend(compact_port_labels(appstore, limit=1))
+        builder.add_icon_label(
+            appstore_rect[0],
+            appstore_rect[1],
+            appstore_rect[2],
+            appstore_rect[3],
+            ICON_TARGETS["appstore"],
+            appstore_lines,
+            name="AppStoreStandalone",
+            text_color=BODY_TEXT,
+            icon_cap=builder.sy(170000),
+            text_size=460,
+        )
+        start_x = nginx_rect[0] + nginx_rect[2] // 2
+        start_y = nginx_rect[1] + nginx_rect[3]
+        end_x = appstore_rect[0] + appstore_rect[2] // 2
+        end_y = appstore_rect[1]
+        builder.add_connector(start_x, start_y, end_x, end_y, "2A9D8F", name="NginxToAppStore")
+        if appstore.get("ports"):
+            builder.add_line_label(start_x, start_y, end_x, end_y, ",".join(appstore["ports"][:1]), "2A9D8F", w=builder.sx(300000), h=builder.sy(120000), y_offset=-builder.sy(90000))
+        connections.append({"from": nginx["display_name"] if nginx else "Nginx", "to": appstore["display_name"], "ports": appstore.get("ports", [])[:1]})
 
     return builder.build(), connections, builder.image_rels
 
@@ -1592,11 +1988,15 @@ def build_slide_rels_xml(existing_rels_xml: bytes, image_rels: list[tuple[str, s
 
 def write_pptx_from_template(template_path: Path, output_path: Path, slide_xml: str, image_rels: list[tuple[str, str]] | None = None) -> None:
     image_rels = image_rels or []
-    extra_media = {
-        "ppt/media/k8s-icon.png": (SCRIPT_DIR.parent / "assets" / "k8s.png").read_bytes(),
-        "ppt/media/user-icon.png": (SCRIPT_DIR.parent / "assets" / "用户.png").read_bytes(),
-    } if image_rels else {}
-    with zipfile.ZipFile(template_path, "r") as source, zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as target:
+    extra_media = {}
+    if image_rels:
+        for _, target in image_rels:
+            filename = "ppt/media/" + Path(target).name
+            source_path = ICON_TARGET_TO_SOURCE.get(target)
+            if source_path and source_path.exists():
+                extra_media[filename] = source_path.read_bytes()
+    tmp_output = output_path.with_suffix(output_path.suffix + ".tmp")
+    with zipfile.ZipFile(template_path, "r") as source, zipfile.ZipFile(tmp_output, "w", compression=zipfile.ZIP_DEFLATED) as target:
         for info in source.infolist():
             if info.filename == "ppt/slides/slide1.xml":
                 data = slide_xml.encode("utf-8")
@@ -1614,6 +2014,7 @@ def write_pptx_from_template(template_path: Path, output_path: Path, slide_xml: 
             target.writestr(new_info, data)
         for filename, data in extra_media.items():
             target.writestr(filename, data)
+    tmp_output.replace(output_path)
 
 
 def validate_pptx(path: Path) -> dict:
