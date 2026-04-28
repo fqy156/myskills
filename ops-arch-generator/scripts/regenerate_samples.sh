@@ -2,8 +2,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-GENERATOR="$ROOT_DIR/scripts/generate_architecture_ppt.py"
-OUTPUT_DIR="$ROOT_DIR/outputs"
+REPO_ROOT="$(cd "$ROOT_DIR/.." && pwd)"
+GENERATOR="$REPO_ROOT/skills/ops-arch-generator/scripts/generate_architecture_ppt.py"
+OUTPUT_DIR="$REPO_ROOT/skills/ops-arch-generator/outputs"
 
 workbooks=(
   "$ROOT_DIR/zyqd-test.xlsx"

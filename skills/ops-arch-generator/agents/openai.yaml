@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ops Arch Generator"
+  short_description: "Generate PowerPoint architecture from ops workbooks"
+  default_prompt: "Use $ops-arch-generator to generate or refine a deployment architecture PPT from an operations workbook."
